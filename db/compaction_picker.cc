@@ -1184,7 +1184,7 @@ void LevelCompactionBuilder::SetupInitialFiles() {
   // Find the compactions by size on all levels.
   bool skipped_l0_to_base = false;
   for (int i = 0; i < compaction_picker_->NumberLevels() - 1; i++) {
-    start_level_score_ = vstorage_->CompactionScore(i);
+    start_level_score_ = vstorage_->CompactionScore(i);			/* 对每个level都计算start_level_score值 */
     start_level_ = vstorage_->CompactionScoreLevel(i);
     assert(i == 0 || start_level_score_ <= vstorage_->CompactionScore(i - 1));
     if (start_level_score_ >= 1) {
@@ -1196,7 +1196,7 @@ void LevelCompactionBuilder::SetupInitialFiles() {
       }
       output_level_ =
           (start_level_ == 0) ? vstorage_->base_level() : start_level_ + 1;
-      if (PickFileToCompact()) {
+      if (PickFileToCompact()) {		/* 接口改为level */
         // found the compaction!
         if (start_level_ == 0) {
           // L0 score = `num L0 files` / `level0_file_num_compaction_trigger`
@@ -1522,7 +1522,7 @@ Compaction* LevelCompactionPicker::PickCompaction(
     VersionStorageInfo* vstorage, LogBuffer* log_buffer) {
   LevelCompactionBuilder builder(cf_name, vstorage, this, log_buffer,
                                  mutable_cf_options, ioptions_);
-  return builder.PickCompaction();
+  return builder.PickCompaction();			/* 对应的 LevelCompactionBuilder::PickCompaction() */
 }
 
 #ifndef ROCKSDB_LITE

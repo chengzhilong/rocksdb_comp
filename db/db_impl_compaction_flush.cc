@@ -1714,10 +1714,10 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       // compaction is not necessary. Need to make sure mutex is held
       // until we make a copy in the following code
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():BeforePickCompaction");
-      c.reset(cfd->PickCompaction(*mutable_cf_options, log_buffer));
+      c.reset(cfd->PickCompaction(*mutable_cf_options, log_buffer));			/* 选取合适的level和sst文件准备进行compaction */
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():AfterPickCompaction");
 
-      if (c != nullptr) {
+      if (c != nullptr) {														/* 说明有合适的level满足compaction条件 */
         bool enough_room = EnoughRoomForCompaction(
             *(c->inputs()), &sfm_reserved_compact_space, log_buffer);
 
@@ -1766,11 +1766,11 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
 if (!c) {
     // Nothing to do
     ROCKS_LOG_BUFFER(log_buffer, "Compaction nothing to do");
-  } else if (c->deletion_compaction()) {							/* compaction过程只是也只有删除所有input files，没做其它工作 */
+  } else if (c->deletion_compaction()) {							/* compaction过程只是也只有删除所有input files, 只有FIFOCompaction支持 */
     // TODO(icanadi) Do we want to honor snapshots here? i.e. not delete old
     // file if there is alive snapshot pointing to it
     assert(c->num_input_files(1) == 0);
-    assert(c->level() == 0);
+    assert(c->level() == 0);										/* Compaction::inputs_[0].level == 0 */
     assert(c->column_family_data()->ioptions()->compaction_style ==
            kCompactionStyleFIFO);
 

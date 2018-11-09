@@ -113,7 +113,7 @@ Status MergeHelper::TimedFullMerge(const MergeOperator* merge_operator,
 Status MergeHelper::MergeUntil(InternalIterator* iter,
                                RangeDelAggregator* range_del_agg,
                                const SequenceNumber stop_before,
-                               const bool at_bottom) {
+                               const bool at_bottom) {				/* 每次调用该函数后，keys_和merge_context_都需要清空 */
   // Get a copy of the internal key, before it's invalidated by iter->Next()
   // Also maintain the list of merge operands seen.
   assert(HasOperator());
@@ -145,7 +145,7 @@ Status MergeHelper::MergeUntil(InternalIterator* iter,
     }
 
     ParsedInternalKey ikey;
-    assert(keys_.size() == merge_context_.GetNumOperands());
+    assert(keys_.size() == merge_context_.GetNumOperands());		/* 任何情况下，都应该成立 */
 
     if (!ParseInternalKey(iter->key(), &ikey)) {
       // stop at corrupted key

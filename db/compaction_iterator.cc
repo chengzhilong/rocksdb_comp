@@ -517,6 +517,7 @@ void CompactionIterator::NextFromInput() {
       // have hit (A)
       // We encapsulate the merge related state machine in a different
       // object to minimize change to the existing flow.
+      /* 每次调用该函数，merge_helper_所指的对象的keys_和merge_context_都会清空，重新存储keys/operand并尝试merge相同的key */
       Status s = merge_helper_->MergeUntil(input_, range_del_agg_,
                                            prev_snapshot, bottommost_level_);
       merge_out_iter_.SeekToFirst();

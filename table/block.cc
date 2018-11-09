@@ -285,6 +285,11 @@ void BlockIter::CorruptionError() {
   value_.clear();
 }
 
+/* 
+ * restart_points位于每个data_block内，表示有多少组KV项，每组内各个KV项的
+ * 前缀都是压缩的，这样方便进行节省空间，而且读取时也需要区分读取的KV项是
+ * 否是在之前restart point内
+ */
 bool DataBlockIter::ParseNextDataKey() {
   current_ = NextEntryOffset();
   const char* p = data_ + current_;
@@ -341,7 +346,7 @@ bool DataBlockIter::ParseNextDataKey() {
 
     value_ = Slice(p + non_shared, value_length);
     while (restart_index_ + 1 < num_restarts_ &&
-           GetRestartPoint(restart_index_ + 1) < current_) {
+           GetRestartPoint(restart_index_ + 1) < current_) {	/* 若当前restart_points内KV项均遍历完了，则开始下一个restart_points */
       ++restart_index_;
     }
     return true;

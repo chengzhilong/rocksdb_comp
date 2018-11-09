@@ -61,6 +61,7 @@ BlockBasedTableFactory::BlockBasedTableFactory(
   }
 }
 
+/* 读sst文件之前调用 */
 Status BlockBasedTableFactory::NewTableReader(
     const TableReaderOptions& table_reader_options,
     unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
@@ -74,6 +75,7 @@ Status BlockBasedTableFactory::NewTableReader(
       table_reader_options.level, table_reader_options.immortal);
 }
 
+/* 写sst文件之前调用 */
 TableBuilder* BlockBasedTableFactory::NewTableBuilder(
     const TableBuilderOptions& table_builder_options, uint32_t column_family_id,
     WritableFileWriter* file) const {

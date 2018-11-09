@@ -559,17 +559,17 @@ class LevelIterator final : public InternalIterator {
   const ReadOptions read_options_;
   const EnvOptions& env_options_;
   const InternalKeyComparator& icomparator_;
-  const LevelFilesBrief* flevel_;
-  mutable FileDescriptor current_value_;
-  const SliceTransform* prefix_extractor_;
+  const LevelFilesBrief* flevel_;		/* 存储某一level的所有sst文件的fd和其他元数据信息，比如key-range、FileMetaData等 */
+  mutable FileDescriptor current_value_;		/* 当前正在操作的sst文件的元数据信息 */
+  const SliceTransform* prefix_extractor_;		/* 在存储key时会对prefix进行复用以节省空间，这里读取时会做些解析 */
 
-  HistogramImpl* file_read_hist_;
-  bool should_sample_;
-  bool for_compaction_;
-  bool skip_filters_;
-  size_t file_index_;
-  int level_;
-  RangeDelAggregator* range_del_agg_;
+  HistogramImpl* file_read_hist_;		/* 文件读取柱状图统计 */
+  bool should_sample_;					/* 统计信息：记录read次数 */
+  bool for_compaction_;					/* 本次NewIterator目的是否为了compact、还是read */
+  bool skip_filters_;					/* 读取时是否跳过filters_ */
+  size_t file_index_;					/* 用于记录某level传递sst文件的个数（比如compact，则记录level-i层待compact的sst个数） */
+  int level_;							/* 当前处于哪一层 */
+  RangeDelAggregator* range_del_agg_;	/* range-del 聚合器，记录tombstones */
   IteratorWrapper file_iter_;  // May be nullptr
   PinnedIteratorsManager* pinned_iters_mgr_;
 };
@@ -625,12 +625,13 @@ void LevelIterator::Prev() {
   SkipEmptyFileBackward();
 }
 
+/* 遍历找下一个非empty文件，获取其iterator */
 void LevelIterator::SkipEmptyFileForward() {
   while (file_iter_.iter() == nullptr ||
          (!file_iter_.Valid() && file_iter_.status().ok() &&
           !file_iter_.iter()->IsOutOfBound())) {
     // Move to next file
-    if (file_index_ >= flevel_->num_files - 1) {
+    if (file_index_ >= flevel_->num_files - 1) {		/* 最后一个file，则结束了，可以直接设为nullptr */
       // Already at the last file
       SetFileIterator(nullptr);
       return;
@@ -686,7 +687,7 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
     // which is cached in block cache.
     //
     if (file_iter_.iter() != nullptr && !file_iter_.status().IsIncomplete() &&
-        new_file_index == file_index_) {
+        new_file_index == file_index_) {			/* 啥都不用做 */
       // file_iter_ is already constructed with this iterator, so
       // no need to change anything
     } else {
@@ -4157,16 +4158,24 @@ InternalIterator* VersionSet::MakeInputIterator(
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
+  /* c->input_levels(0)->num_files: level-0要进行compact的sst数量
+   * c->num_input_levels(): 表示compact对应的input levels数量
+   */
   const size_t space = (c->level() == 0 ? c->input_levels(0)->num_files +
                                               c->num_input_levels() - 1
                                         : c->num_input_levels());
-  InternalIterator** list = new InternalIterator* [space];
+  InternalIterator** list = new InternalIterator* [space];	/* 若要compact的level>0，则只要两个iterator就够(每层1个，每层key皆有序) */
   size_t num = 0;
   for (size_t which = 0; which < c->num_input_levels(); which++) {
     if (c->input_levels(which)->num_files != 0) {
-      if (c->level(which) == 0) {
+      if (c->level(which) == 0) {		/* 若要compact的level为0，则每个sst文件都需要一个独立的InternalIterator */
         const LevelFilesBrief* flevel = c->input_levels(which);
         for (size_t i = 0; i < flevel->num_files; i++) {
+		  /* 
+		   * 最终返回类型为: BlockBasedTableIterator<DataBlockIter>* 
+		   * 该函数调用完毕后，也就是已经读完了sst文件的所有metadata信
+		   * 息，同时存储了block_index信息
+		   */
           list[num++] = cfd->table_cache()->NewIterator(
               read_options, env_options_compactions, cfd->internal_comparator(),
               *flevel->files[i].file_metadata, range_del_agg,
@@ -4178,6 +4187,12 @@ InternalIterator* VersionSet::MakeInputIterator(
         }
       } else {
         // Create concatenating iterator for the files from this level
+        /*
+         * LevelIterator类型迭代器最终还是会通过SeekToFirst()调用
+         * LevelIterator::InitFileIterator() -> InitFileIterator()，
+         * 而该函数会直接调用table_cache_->NewIterator()和上述if语
+         * 句殊途同归
+		 */
         list[num++] = new LevelIterator(
             cfd->table_cache(), read_options, env_options_compactions,
             cfd->internal_comparator(), c->input_levels(which),
@@ -4192,7 +4207,7 @@ InternalIterator* VersionSet::MakeInputIterator(
   assert(num <= space);
   InternalIterator* result =
       NewMergingIterator(&c->column_family_data()->internal_comparator(), list,
-                         static_cast<int>(num));
+                         static_cast<int>(num));		/* 将level-0的各个sst文件或其他level的iterator用堆组织 */
   delete[] list;
   return result;
 }

@@ -148,14 +148,14 @@ class MergeHelper {
   bool allow_single_operand_;
   SequenceNumber latest_snapshot_;
   const SnapshotChecker* const snapshot_checker_;
-  int level_;
+  int level_;				/* level */
 
   // the scratch area that holds the result of MergeUntil
   // valid up to the next MergeUntil call
 
   // Keeps track of the sequence of keys seen
-  std::deque<std::string> keys_;
-  // Parallel with keys_; stores the operands
+  std::deque<std::string> keys_;					/* 存放着遍历得到的key放在双向链表里 */
+  // Parallel with keys_; stores the operands		/* 操作符放在对应的merge_context里：过滤已删除或重复的旧数据 */
   mutable MergeContext merge_context_;
 
   StopWatchNano filter_timer_;

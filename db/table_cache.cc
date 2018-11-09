@@ -122,7 +122,7 @@ Status TableCache::GetTableReader(
                            internal_comparator, skip_filters, immortal_tables_,
                            level),
         std::move(file_reader), fd.GetFileSize(), table_reader,
-        prefetch_index_and_filter_in_cache);
+        prefetch_index_and_filter_in_cache);			/* ???默认调用 BlockBasedTableFactory::NewTableReader, table_reader类型为 BlockBasedTable??? */
     TEST_SYNC_POINT("TableCache::GetTableReader:0");
   }
   return s;
@@ -178,6 +178,11 @@ Status TableCache::FindTable(const EnvOptions& env_options,
   return s;
 }
 
+/*
+ * 1. s = GetTableReader(...)
+ * 2. result = table_reader->NewIterator(...)
+ * 3. result->RegisterCleanup(...)
+ */
 InternalIterator* TableCache::NewIterator(
     const ReadOptions& options, const EnvOptions& env_options,
     const InternalKeyComparator& icomparator, const FileMetaData& file_meta,
@@ -212,17 +217,17 @@ InternalIterator* TableCache::NewIterator(
   }
 
   auto& fd = file_meta.fd;
-  if (create_new_table_reader) {
+  if (create_new_table_reader) {				/* READ */
     unique_ptr<TableReader> table_reader_unique_ptr;
     s = GetTableReader(
         env_options, icomparator, fd, true /* sequential_mode */, readahead,
         !for_compaction /* record stats */, nullptr, &table_reader_unique_ptr,
         prefix_extractor, false /* skip_filters */, level,
-        true /* prefetch_index_and_filter_in_cache */, for_compaction);
+        true /* prefetch_index_and_filter_in_cache */, for_compaction);		/* 目的为获取TableReader* table_reader */
     if (s.ok()) {
       table_reader = table_reader_unique_ptr.release();
     }
-  } else {
+  } else {										/* WRITE */
     table_reader = fd.table_reader;
     if (table_reader == nullptr) {
       s = FindTable(env_options, icomparator, fd, &handle, prefix_extractor,
@@ -240,8 +245,9 @@ InternalIterator* TableCache::NewIterator(
         !options.table_filter(*table_reader->GetTableProperties())) {
       result = NewEmptyInternalIterator(arena);
     } else {
+	  /* 返回类型为: BlockBasedTableIterator<DataBlockIter>* */
       result = table_reader->NewIterator(options, prefix_extractor, arena,
-                                         skip_filters, for_compaction);
+                                         skip_filters, for_compaction);	/* InternalIterator* BlockBasedTable::NewIterator(...) */
     }
     if (create_new_table_reader) {
       assert(handle == nullptr);

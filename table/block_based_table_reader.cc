@@ -721,6 +721,12 @@ Slice BlockBasedTable::GetCacheKey(const char* cache_key_prefix,
   return Slice(cache_key, static_cast<size_t>(end - cache_key));
 }
 
+/* 1. 从指定的file读取sst文件的所有元数据信息并逐步解析，包括footer、metaindex block、properties、
+ * range_del block, index block 和 filter block
+ * 2. 将这些读取的内容赋值给Rep rep，并初始化TableReader *new_table(rep)；
+ * 3. table_reader = new_table
+ * 4. 注意，此时Rep时BlockBasedTable::Rep
+ */
 Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
                              const EnvOptions& env_options,
                              const BlockBasedTableOptions& table_options,
@@ -732,7 +738,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
                              const bool prefetch_index_and_filter_in_cache,
                              const bool skip_filters, const int level,
                              const bool immortal_table) {
-  table_reader->reset();
+  table_reader->reset();		/* 该函数被调用时，最关键的是返回一个TableReader*指针回去 */
 
   Footer footer;
 
@@ -751,7 +757,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
       prefetch_all || preload_all ? 512 * 1024 : 4 * 1024;
   size_t prefetch_off;
   size_t prefetch_len;
-  if (file_size < kTailPrefetchSize) {
+  if (file_size < kTailPrefetchSize) {			/* 在此之前，先预读最大不超过file_size大小的kTailPrefetchSize大小 */
     prefetch_off = 0;
     prefetch_len = static_cast<size_t>(file_size);
   } else {
@@ -767,7 +773,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
     s = prefetch_buffer->Prefetch(file.get(), prefetch_off, prefetch_len);
   }
   s = ReadFooterFromFile(file.get(), prefetch_buffer.get(), file_size, &footer,
-                         kBlockBasedTableMagicNumber);
+                         kBlockBasedTableMagicNumber);			/* 读取sst文件的Footer部分后解析到变量footer里 */
   if (!s.ok()) {
     return s;
   }
@@ -784,7 +790,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
   Rep* rep = new BlockBasedTable::Rep(ioptions, env_options, table_options,
                                       internal_comparator, skip_filters,
                                       immortal_table);
-  rep->file = std::move(file);
+  rep->file = std::move(file);									/* 初始化赋值rep */
   rep->footer = footer;
   rep->index_type = table_options.index_type;
   rep->hash_index_allow_collision = table_options.hash_index_allow_collision;
@@ -805,7 +811,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
   // Read meta index
   std::unique_ptr<Block> meta;
   std::unique_ptr<InternalIterator> meta_iter;
-  s = ReadMetaBlock(rep, prefetch_buffer.get(), &meta, &meta_iter);
+  s = ReadMetaBlock(rep, prefetch_buffer.get(), &meta, &meta_iter);		/* 接着从file读取meta和meta_iter部分 */
   if (!s.ok()) {
     return s;
   }
@@ -979,7 +985,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
                   rep->filter_type == Rep::FilterType::kPartitionedFilter);
   // pre-fetching of blocks is turned on
   // Will use block cache for index/filter blocks access
-  // Always prefetch index and filter for level 0
+  // Always prefetch index and filter for level 0：总是会预取level 0 的 index block 和 filter block
   if (table_options.cache_index_and_filter_blocks) {
     assert(table_options.block_cache != nullptr);
     if (prefetch_index) {
@@ -1031,7 +1037,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
     // and with a same life-time as this table object.
     IndexReader* index_reader = nullptr;
     s = new_table->CreateIndexReader(prefetch_buffer.get(), &index_reader,
-                                     meta_iter.get(), level);
+                                     meta_iter.get(), level);		/* 读取index_block */
     if (s.ok()) {
       rep->index_reader.reset(index_reader);
       // The partitions of partitioned index are always stored in cache. They
@@ -1046,7 +1052,7 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
         const bool is_a_filter_partition = true;
         auto filter = new_table->ReadFilter(
             prefetch_buffer.get(), rep->filter_handle, !is_a_filter_partition,
-            rep->table_prefix_extractor.get());
+            rep->table_prefix_extractor.get());						/* 读取filter_block */
         rep->filter.reset(filter);
         // Refer to the comment above about paritioned indexes always being
         // cached
@@ -1356,7 +1362,7 @@ FilterBlockReader* BlockBasedTable::ReadFilter(
                              ReadOptions(), filter_handle, &block,
                              rep->ioptions, false /* decompress */,
                              dummy_comp_dict, rep->persistent_cache_options);
-  Status s = block_fetcher.ReadBlockContents();
+  Status s = block_fetcher.ReadBlockContents();		/* 从sst文件中读取指定的block */
 
   if (!s.ok()) {
     // Error reading the block
@@ -1385,7 +1391,7 @@ FilterBlockReader* BlockBasedTable::ReadFilter(
       return new BlockBasedFilterBlockReader(
           rep->prefix_filtering ? prefix_extractor : nullptr,
           rep->table_options, rep->whole_key_filtering, std::move(block),
-          rep->ioptions.statistics);
+          rep->ioptions.statistics);		/* 参数block通过引用传递给BlockBasedFilterBlockReaer类对象内的data_和offset_变量 */
 
     case Rep::FilterType::kFullFilter: {
       auto filter_bits_reader =
@@ -2051,10 +2057,10 @@ void BlockBasedTableIterator<TBlockIter>::SeekToLast() {
 }
 
 template <class TBlockIter>
-void BlockBasedTableIterator<TBlockIter>::Next() {
+void BlockBasedTableIterator<TBlockIter>::Next() {		/* 读取下一个key-value */
   assert(block_iter_points_to_real_block_);
-  block_iter_.Next();
-  FindKeyForward();
+  block_iter_.Next();									/* 每次预先读取一个data_block，block_iter_就是遍历这个data_block内下一个KV项 */
+  FindKeyForward();										/* 检查当前data_block是否遍历完，若没有则直接忽略；否则读取下一个data_block */
 }
 
 template <class TBlockIter>
@@ -2065,7 +2071,7 @@ void BlockBasedTableIterator<TBlockIter>::Prev() {
 }
 
 template <class TBlockIter>
-void BlockBasedTableIterator<TBlockIter>::InitDataBlock() {
+void BlockBasedTableIterator<TBlockIter>::InitDataBlock() {		/* 初始化并从磁盘读取或预读一个data block，每个data block内有若干个restart_points */
   BlockHandle data_block_handle;
   Slice handle_slice = index_iter_->value();
   if (!block_iter_points_to_real_block_ ||
@@ -2120,20 +2126,20 @@ void BlockBasedTableIterator<TBlockIter>::FindKeyForward() {
   assert(!is_out_of_bound_);
   // TODO the while loop inherits from two-level-iterator. We don't know
   // whether a block can be empty so it can be replaced by an "if".
-  while (!block_iter_.Valid()) {
+  while (!block_iter_.Valid()) {				/* 当前block_iter_指向的buf为invalid，则说明当前data_block已经遍历完毕 */
     if (!block_iter_.status().ok()) {
       return;
     }
-    ResetDataIter();
+    ResetDataIter();							/* 重置block_iter_ */
     // We used to check the current index key for upperbound.
     // It will only save a data reading for a small percentage of use cases,
     // so for code simplicity, we removed it. We can add it back if there is a
     // significnat performance regression.
-    index_iter_->Next();
+    index_iter_->Next();						/* index_iter指向下一个index entry */
 
     if (index_iter_->Valid()) {
-      InitDataBlock();
-      block_iter_.SeekToFirst();
+      InitDataBlock();							/* 根据index_iter_从指定sst文件中读取整个数据块data_block */
+      block_iter_.SeekToFirst();				/* block_iter_指向这个data_block的第一个KV项 */
     } else {
       return;
     }
@@ -2145,7 +2151,7 @@ void BlockBasedTableIterator<TBlockIter>::FindKeyForward() {
        block_iter_points_to_real_block_ && block_iter_.Valid() &&
        icomp_.user_comparator()->Compare(ExtractUserKey(block_iter_.key()),
                                          *read_options_.iterate_upper_bound) >=
-           0);
+           0);									/* 检查key是否超出边界 */
   TEST_SYNC_POINT_CALLBACK(
       "BlockBasedTable::BlockEntryIteratorState::KeyReachedUpperBound",
       &reached_upper_bound);

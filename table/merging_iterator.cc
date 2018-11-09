@@ -95,7 +95,7 @@ class MergingIterator : public InternalIterator {
 
   virtual Status status() const override { return status_; }
 
-  virtual void SeekToFirst() override {
+  virtual void SeekToFirst() override {		/* 将children_所有元素重新插入到最小堆中，返回最小堆的堆顶元素(重复元素除外)，改变方向 */
     ClearHeaps();
     status_ = Status::OK();
     for (auto& child : children_) {
@@ -111,7 +111,7 @@ class MergingIterator : public InternalIterator {
     current_ = CurrentForward();
   }
 
-  virtual void SeekToLast() override {
+  virtual void SeekToLast() override {	/* 将children_所有元素重新插入到最大堆中，返回最大堆的堆顶元素，改变方向 */
     ClearHeaps();
     InitMaxHeap();
     status_ = Status::OK();
@@ -311,13 +311,14 @@ class MergingIterator : public InternalIterator {
   void InitMaxHeap();
 
   bool is_arena_mode_;
-  const InternalKeyComparator* comparator_;
-  autovector<IteratorWrapper, kNumIterReserve> children_;
+  const InternalKeyComparator* comparator_;			/* 比较器 */
+  autovector<IteratorWrapper, kNumIterReserve> children_;	/* 每个成员：记录level-0层每个sst文件或其它level层每层待处理的sst文件 */
 
   // Cached pointer to child iterator with the current key, or nullptr if no
   // child iterators are valid.  This is the top of minHeap_ or maxHeap_
   // depending on the direction.
-  IteratorWrapper* current_;
+  /* MergingIterator将多个iterator以堆的形式组织起来，根据key值和direction决定了其为最大堆还是最小堆 */
+  IteratorWrapper* current_;			/* 根据direction决定是最小堆还是最大堆 */
   // If any of the children have non-ok status, this is one of them.
   Status status_;
   // Which direction is the iterator moving?
@@ -327,21 +328,21 @@ class MergingIterator : public InternalIterator {
   };
   Direction direction_;
   MergerMinIterHeap minHeap_;
-  bool prefix_seek_mode_;
+  bool prefix_seek_mode_;			/* 获取prefix + key，在写key时可能会重用前缀，读取时则需要反向解析 */
 
   // Max heap is used for reverse iteration, which is way less common than
   // forward.  Lazily initialize it to save memory.
-  std::unique_ptr<MergerMaxIterHeap> maxHeap_;
+  std::unique_ptr<MergerMaxIterHeap> maxHeap_;	/* 使用时才初始化，延迟处理，节省内存 */
   PinnedIteratorsManager* pinned_iters_mgr_;
 
   void SwitchToForward();
 
-  IteratorWrapper* CurrentForward() const {
+  IteratorWrapper* CurrentForward() const {	/* 当前最小堆的堆顶元素：InternalIterator */
     assert(direction_ == kForward);
     return !minHeap_.empty() ? minHeap_.top() : nullptr;
   }
 
-  IteratorWrapper* CurrentReverse() const {
+  IteratorWrapper* CurrentReverse() const {	/* 当前最大堆的堆顶元素：InternalIterator */
     assert(direction_ == kReverse);
     assert(maxHeap_);
     return !maxHeap_->empty() ? maxHeap_->top() : nullptr;
@@ -355,7 +356,7 @@ void MergingIterator::SwitchToForward() {
   Slice target = key();
   for (auto& child : children_) {
     if (&child != current_) {
-      child.Seek(target);
+      child.Seek(target);						/* 检查child是否valid，child.status()记录状态 */
       considerStatus(child.status());
       if (child.Valid() && comparator_->Equal(target, child.key())) {
         child.Next();
@@ -388,13 +389,13 @@ InternalIterator* NewMergingIterator(const InternalKeyComparator* cmp,
   assert(n >= 0);
   if (n == 0) {
     return NewEmptyInternalIterator(arena);
-  } else if (n == 1) {
+  } else if (n == 1) {				/* 只有一个元素，不用构造堆了 */
     return list[0];
   } else {
-    if (arena == nullptr) {
+    if (arena == nullptr) {			/* 默认构造最小堆：成员为InternalIterator */
       return new MergingIterator(cmp, list, n, false, prefix_seek_mode);
     } else {
-      auto mem = arena->AllocateAligned(sizeof(MergingIterator));
+      auto mem = arena->AllocateAligned(sizeof(MergingIterator));	/* ?字节对齐? */
       return new (mem) MergingIterator(cmp, list, n, true, prefix_seek_mode);
     }
   }

@@ -415,13 +415,13 @@ void CompactionJob::Prepare() {
   // Is this compaction producing files at the bottommost level?
   bottommost_level_ = c->bottommost_level();
 
-  if (c->ShouldFormSubcompactions()) {
+  if (c->ShouldFormSubcompactions()) {							/* 判断该compaction是否可以拆分更小的多线程subcompaction */
     const uint64_t start_micros = env_->NowMicros();
-    GenSubcompactionBoundaries();
+    GenSubcompactionBoundaries();								/* 解析并获取每个sub compaction的boundaries */
     MeasureTime(stats_, SUBCOMPACTION_SETUP_TIME,
                 env_->NowMicros() - start_micros);
 
-    assert(sizes_.size() == boundaries_.size() + 1);
+    assert(sizes_.size() == boundaries_.size() + 1);			/* 此处sizes_是在GenSubcompactionBoundaries()函数中被赋值 */
 
     for (size_t i = 0; i <= boundaries_.size(); i++) {
       Slice* start = i == 0 ? nullptr : &boundaries_[i - 1];
@@ -458,7 +458,7 @@ void CompactionJob::GenSubcompactionBoundaries() {
 
   // Add the starting and/or ending key of certain input files as a potential
   // boundary
-  for (size_t lvl_idx = 0; lvl_idx < c->num_input_levels(); lvl_idx++) {
+  for (size_t lvl_idx = 0; lvl_idx < c->num_input_levels(); lvl_idx++) {	/* 首先遍历所有需要compact的level，取得每一个level的边界 */
     int lvl = c->level(lvl_idx);
     if (lvl >= start_lvl && lvl <= out_lvl) {
       const LevelFilesBrief* flevel = c->input_levels(lvl_idx);
@@ -493,6 +493,7 @@ void CompactionJob::GenSubcompactionBoundaries() {
     }
   }
 
+  /* 对取得的边界进行排序和去重 */
   std::sort(bounds.begin(), bounds.end(),
             [cfd_comparator](const Slice& a, const Slice& b) -> bool {
               return cfd_comparator->Compare(ExtractUserKey(a),
@@ -527,6 +528,7 @@ void CompactionJob::GenSubcompactionBoundaries() {
   }
 
   // Group the ranges into subcompactions
+  /* 计算理想情况下所需要的subcompaction的个数subcompactions以及输出文件的个数sizes_ */
   const double min_file_fill_percent = 4.0 / 5;
   int base_level = v->storage_info()->base_level();
   uint64_t max_output_files = static_cast<uint64_t>(std::ceil(
@@ -539,7 +541,7 @@ void CompactionJob::GenSubcompactionBoundaries() {
                 static_cast<uint64_t>(c->max_subcompactions()),
                 max_output_files});
 
-  if (subcompactions > 1) {
+  if (subcompactions > 1) {	/* 最后更新boundaries_，这里会根据文件大小，通过平均size把range分成几份，最终这些保存在boundaries_中 */
     double mean = sum * 1.0 / subcompactions;
     // Greedily add ranges to the subcompaction until the sum of the ranges'
     // sizes becomes >= the expected mean size of a subcompaction
@@ -572,7 +574,7 @@ Status CompactionJob::Run() {
   log_buffer_->FlushBufferToLog();
   LogCompaction();
 
-  const size_t num_threads = compact_->sub_compact_states.size();		/* sub_compaction使用的总线程数量 */
+  const size_t num_threads = compact_->sub_compact_states.size();	/* 每一个sub_compaction可对应一个线程(预先在Prepare()函数内确定) */
   assert(num_threads > 0);
   const uint64_t start_micros = env_->NowMicros();
 
@@ -795,6 +797,10 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
   std::unique_ptr<RangeDelAggregator> range_del_agg(
       new RangeDelAggregator(cfd->internal_comparator(), existing_snapshots_));
+  
+  /* key points: versions_->MakeInputIterator(...) */
+  /* input记录着包括两层要compact的所有sst的iterator信息 */
+  /* 返回指针类型InternalIteartor* 应该是指向 BlockBasedTableIterator<DataBlockIter> */
   std::unique_ptr<InternalIterator> input(versions_->MakeInputIterator(
       sub_compact->compaction, range_del_agg.get(), env_optiosn_for_read_));
 
@@ -860,6 +866,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
         sub_compact->compaction->CreateCompactionFilter();
     compaction_filter = compaction_filter_from_factory.get();
   }
+  /* MergeHelper存放待filter的Keys和Operation操作符 */
   MergeHelper merge(
       env_, cfd->user_comparator(), cfd->ioptions()->merge_operator,
       compaction_filter, db_options_.info_log.get(),

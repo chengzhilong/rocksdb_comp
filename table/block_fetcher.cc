@@ -188,7 +188,7 @@ Status BlockFetcher::ReadBlockContents() {
       return status_;
     }
   } else if (!TryGetCompressedBlockFromPersistentCache()) {
-    PrepareBufferForBlockFromFile();
+    PrepareBufferForBlockFromFile();			/* 为used_buf_预分配足够的空间 */
     Status s;
 
     {
