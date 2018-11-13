@@ -137,7 +137,7 @@ class CompactionJob {
 
   Env* env_;
   // env_option optimized for compaction table reads
-  EnvOptions env_optiosn_for_read_;
+  EnvOptions env_optiosn_for_read_;			/* env_->OptimizeForCompactionTableRead(env_options, db_options_),主要当作参数传递 */
   VersionSet* versions_;
   const std::atomic<bool>* shutting_down_;
   const SequenceNumber preserve_deletes_seqnum_;
@@ -160,17 +160,17 @@ class CompactionJob {
 
   const SnapshotChecker* const snapshot_checker_;
 
-  std::shared_ptr<Cache> table_cache_;
+  std::shared_ptr<Cache> table_cache_;		/* 用于CleanupCompaction时清除未提交compaction的file */
 
   EventLogger* event_logger_;
 
-  bool bottommost_level_;
+  bool bottommost_level_;					/* 当前compaction是否是处于最底层 */
   bool paranoid_file_checks_;
   bool measure_io_stats_;
   // Stores the Slices that designate the boundaries for each subcompaction
-  std::vector<Slice> boundaries_;
+  std::vector<Slice> boundaries_;			/* 记录每个subcompaction分得的key的边界值 */
   // Stores the approx size of keys covered in the range of each subcompaction
-  std::vector<uint64_t> sizes_;
+  std::vector<uint64_t> sizes_;				/* 记录每个subcompaction大概size，与boundaries_一同被赋值 */
   Env::WriteLifeTimeHint write_hint_;
 };
 

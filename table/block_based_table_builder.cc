@@ -912,6 +912,8 @@ uint64_t BlockBasedTableBuilder::FileSize() const {
   return rep_->offset;
 }
 
+// If the user defined table properties collector suggest the file to
+// be further compacted.
 bool BlockBasedTableBuilder::NeedCompact() const {
   for (const auto& collector : rep_->table_properties_collectors) {
     if (collector->NeedCompact()) {

@@ -180,6 +180,11 @@ class MergingIterator : public InternalIterator {
     }
   }
 
+  /*
+   * 多路合并，每个节点就是表示一个sst文件的iterator，当其处于堆的顶部时，也就是表示
+   * 所有sst文件中iterator指向的当前key值为最小。调用Next()函数之后，会在不同sst文件
+   * 间比较时，将key值最小的所属iterator放在堆的顶部
+   */
   virtual void Next() override {
     assert(Valid());
 
@@ -383,6 +388,9 @@ void MergingIterator::InitMaxHeap() {
   }
 }
 
+/* 构造多路比较key大小所用的堆(rocksdb使用自己的堆实现，相比priority queue的
+ * O(logN))时间复杂度更小，为[1, O(logN)] 
+ */
 InternalIterator* NewMergingIterator(const InternalKeyComparator* cmp,
                                      InternalIterator** list, int n,
                                      Arena* arena, bool prefix_seek_mode) {

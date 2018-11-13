@@ -932,7 +932,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
 
     // Open output file if necessary
     if (sub_compact->builder == nullptr) {
-      status = OpenCompactionOutputFile(sub_compact);
+      status = OpenCompactionOutputFile(sub_compact);		/* 创建新的sst文件 */
       if (!status.ok()) {
         break;
       }
@@ -942,7 +942,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     sub_compact->builder->Add(key, value);
     sub_compact->current_output_file_size = sub_compact->builder->FileSize();
     sub_compact->current_output()->meta.UpdateBoundaries(
-        key, c_iter->ikey().sequence);
+        key, c_iter->ikey().sequence);						/* FileMetaData meta时刻更新boundaries(smallest_seqno, largest_seqno) */
     sub_compact->num_output_records++;
 
     if (sub_compact->outputs.size() == 1) {  // first output file
@@ -1168,7 +1168,7 @@ Status CompactionJob::FinishCompactionOutputFile(
   assert(sub_compact->builder != nullptr);
   assert(sub_compact->current_output() != nullptr);
 
-  uint64_t output_number = sub_compact->current_output()->meta.fd.GetNumber();
+  uint64_t output_number = sub_compact->current_output()->meta.fd.GetNumber();		/* 新output一个文件时，先获取其Number */
   assert(output_number != 0);
 
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
