@@ -17,6 +17,7 @@
 #include "rocksdb/sst_file_manager.h"
 #include "rocksdb/wal_filter.h"
 #include "util/logging.h"
+#include "utilities/nvm_write_cache/nvm_cache_options.h"
 
 namespace rocksdb {
 
@@ -85,7 +86,8 @@ ImmutableDBOptions::ImmutableDBOptions(const DBOptions& options)
       allow_ingest_behind(options.allow_ingest_behind),
       preserve_deletes(options.preserve_deletes),
       two_write_queues(options.two_write_queues),
-      manual_wal_flush(options.manual_wal_flush) {
+      manual_wal_flush(options.manual_wal_flush),
+      nvm_cache_options(options.nvm_cache_options){
 }
 
 void ImmutableDBOptions::Dump(Logger* log) const {

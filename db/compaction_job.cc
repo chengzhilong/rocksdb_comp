@@ -127,7 +127,7 @@ struct CompactionJob::SubcompactionState {
   // State kept for output being generated
   std::vector<Output> outputs;
   std::unique_ptr<WritableFileWriter> outfile;
-  std::unique_ptr<TableBuilder> builder;
+  std::unique_ptr<TableBuilder> builder;		/* 用于指示输出sst文件的table格式 */
   Output* current_output() {
     if (outputs.empty()) {
       // This subcompaction's outptut could be empty if compaction was aborted
@@ -207,6 +207,7 @@ struct CompactionJob::SubcompactionState {
 
   // Returns true iff we should stop building the current output
   // before processing "internal_key".
+  /* output的sst文件，大小差不多合适就可以准备Finish该sst文件 */
   bool ShouldStopBefore(const Slice& internal_key, uint64_t curr_file_size) {
     const InternalKeyComparator* icmp =
         &compaction->column_family_data()->internal_comparator();
@@ -435,6 +436,21 @@ void CompactionJob::Prepare() {
   }
 }
 
+void CompactionJob::PrepareKeyRange()
+{
+	AutoThreadOperationStageUpdater stage_updater(
+      ThreadStatus::STAGE_COMPACTION_PREPARE);
+
+  // Generate file_levels_ for compaction berfore making Iterator
+  auto* c = compact_->compaction;
+  assert(c->column_family_data() != nullptr);
+  assert(c->column_family_data()->current()->storage_info()->NumLevelFiles(
+             compact_->compaction->level()) > 0);	
+
+  // 先暂时考虑只有单个sub_compaction
+  compact_->sub_compact_states.emplace_back(c, nullptr, nullptr);
+}
+
 struct RangeWithSize {
   Range range;
   uint64_t size;
@@ -468,19 +484,19 @@ void CompactionJob::GenSubcompactionBoundaries() {
         continue;
       }
 
-      if (lvl == 0) {
+      if (lvl == 0) {														/* 对于level-0，每个sst文件单独存储其smallest_key和largest_key */
         // For level 0 add the starting and ending key of each file since the
         // files may have greatly differing key ranges (not range-partitioned)
         for (size_t i = 0; i < num_files; i++) {
           bounds.emplace_back(flevel->files[i].smallest_key);
           bounds.emplace_back(flevel->files[i].largest_key);
         }
-      } else {
+      } else {																/* 其他level，则只需要存储该level的smallest_key和largest_key */
         // For all other levels add the smallest/largest key in the level to
         // encompass the range covered by that level
         bounds.emplace_back(flevel->files[0].smallest_key);
         bounds.emplace_back(flevel->files[num_files - 1].largest_key);
-        if (lvl == out_lvl) {
+        if (lvl == out_lvl) {												/* ????output_level的相邻sst文件可能会非常相邻???? */
           // For the last level include the starting keys of all files since
           // the last level is the largest and probably has the widest key
           // range. Since it's range partitioned, the ending key of one file
@@ -522,7 +538,7 @@ void CompactionJob::GenSubcompactionBoundaries() {
     }
 
     const Slice b = *it;
-    uint64_t size = versions_->ApproximateSize(v, a, b, start_lvl, out_lvl + 1);
+    uint64_t size = versions_->ApproximateSize(v, a, b, start_lvl, out_lvl + 1);	/* 获取[start_lvl, out_lvl+1)层的key位于[a, b]之间的size */
     ranges.emplace_back(a, b, size);
     sum += size;
   }
@@ -797,13 +813,26 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
   std::unique_ptr<RangeDelAggregator> range_del_agg(
       new RangeDelAggregator(cfd->internal_comparator(), existing_snapshots_));
+
+  // added by ChengZhilong
+  int compact_level = sub_compact->compaction->start_level();
+  assert(compact_level >= 0);
   
   /* key points: versions_->MakeInputIterator(...) */
   /* input记录着包括两层要compact的所有sst的iterator信息 */
   /* 返回指针类型InternalIteartor* 应该是指向 BlockBasedTableIterator<DataBlockIter> */
+  std::unique_ptr<InternalIterator> input;
+  if (compact_level == 0) {
+  	input = versions_->MakeKeyRangeBasedInputIterator(sub_compact->compaction, 
+		range_del_agg.get(), env_optiosn_for_read_);
+  } else {
+  	input = versions_->MakeInputIterator(sub_compact->compaction, 
+		range_del_agg.get(), env_optiosn_for_read_);
+  }
+  /*
   std::unique_ptr<InternalIterator> input(versions_->MakeInputIterator(
       sub_compact->compaction, range_del_agg.get(), env_optiosn_for_read_));
-
+  */
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_COMPACTION_PROCESS_KV);
 
@@ -1380,6 +1409,9 @@ Status CompactionJob::InstallCompactionResults(
   // still exist in the current version and in the same original level.
   // This ensures that a concurrent compaction did not erroneously
   // pick the same files to compact_.
+  /* 先检验compaction的input的files是否与vstorages记录的文件对应着，
+   * 这时候vstorage记录的所有sst文件的变量files_还没有被update
+   */
   if (!versions_->VerifyCompactionFileConsistency(compaction)) {
     Compaction::InputLevelSummaryBuffer inputs_summary;
 
@@ -1398,11 +1430,11 @@ Status CompactionJob::InstallCompactionResults(
   }
 
   // Add compaction inputs
-  compaction->AddInputDeletions(compact_->compaction->edit());
+  compaction->AddInputDeletions(compact_->compaction->edit());		/* 将compact之前的sst文件添加到VersionEdit::deleted_files_[]里 */
 
   for (const auto& sub_compact : compact_->sub_compact_states) {
     for (const auto& out : sub_compact.outputs) {
-      compaction->edit()->AddFile(compaction->output_level(), out.meta);
+      compaction->edit()->AddFile(compaction->output_level(), out.meta);/* 将compact生成的新sst文件添加到VersionEdit::new_files_[]里 */
     }
   }
   return versions_->LogAndApply(compaction->column_family_data(),

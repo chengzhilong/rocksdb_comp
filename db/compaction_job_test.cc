@@ -98,6 +98,10 @@ class CompactionJobTest : public testing::Test {
     return InternalKey(user_key, seq_num, t).Encode().ToString();
   }
 
+  /*
+   * param(@contents): 包含若干个KV对
+   * 函数作用：往db中添加包含若干个contents组成的sst文件
+   */
   void AddMockFile(const stl_wrappers::KVMap& contents, int level = 0) {
     assert(contents.size() > 0);
 
@@ -151,6 +155,7 @@ class CompactionJobTest : public testing::Test {
   }
 
   // returns expected result after compaction
+  /* 创建2个类型为Mock的sst文件，并将其添加到Level-0层 */
   stl_wrappers::KVMap CreateTwoFiles(bool gen_corrupted_keys) {
     auto expected_results = mock::MakeMockFile();
     const int kKeysPerFile = 10000;
@@ -185,7 +190,7 @@ class CompactionJobTest : public testing::Test {
         }
       }
 
-      AddMockFile(contents);
+      AddMockFile(contents);		/* 默认添加到Level-0层 */
     }
 
     SetLastSequence(sequence_number);
@@ -204,14 +209,15 @@ class CompactionJobTest : public testing::Test {
     Status s = env_->NewWritableFile(
         manifest, &file, env_->OptimizeForManifestWrite(env_options_));
     ASSERT_OK(s);
-    unique_ptr<WritableFileWriter> file_writer(
-        new WritableFileWriter(std::move(file), env_options_));
+	
+    unique_ptr<WritableFileWriter> file_writer(new WritableFileWriter(std::move(file), env_options_));
     {
-      log::Writer log(std::move(file_writer), 0, false);
-      std::string record;
-      new_db.EncodeTo(&record);
-      s = log.AddRecord(record);
+		log::Writer log_w(std::move(file_writer), 0, false);
+		std::string recrod;
+		new_db.EncodeTo(&record);
+		s = log_w.AddRecord(record);
     }
+	
     ASSERT_OK(s);
     // Make "CURRENT" file that points to the new manifest file.
     s = SetCurrentFile(env_, dbname_, 1, nullptr);

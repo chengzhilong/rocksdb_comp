@@ -117,7 +117,7 @@ int InternalKeyComparator::Compare(const ParsedInternalKey& a,
   int r = user_comparator_->Compare(a.user_key, b.user_key);
   PERF_COUNTER_ADD(user_key_comparison_count, 1);
   if (r == 0) {
-    if (a.sequence > b.sequence) {
+    if (a.sequence > b.sequence) {			/* 这里和leveldb好像不一样，sequence_no是递减的，也就是越小就是key越大的 */
       r = -1;
     } else if (a.sequence < b.sequence) {
       r = +1;

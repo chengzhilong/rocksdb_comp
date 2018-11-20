@@ -1499,7 +1499,7 @@ void DBImpl::BackgroundCallCompaction(PrepickedCompaction* prepicked_compaction,
 
     // This call will unlock/lock the mutex to wait for current running
     // IngestExternalFile() calls to finish.
-    WaitForIngestFile();
+    WaitForIngestFile();				/* 等待添加sst文件到当前db */
 
     num_running_compactions_++;			/* 正在准备compaction的job+1 */
 
@@ -1641,7 +1641,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
   // InternalKey manual_end_storage;
   // InternalKey* manual_end = &manual_end_storage;
   bool sfm_reserved_compact_space = false;
-  if (is_manual) {
+  if (is_manual) {						/* 手动触发Compaction，优先处理 */
     ManualCompactionState* m = manual_compaction;
     assert(m->in_progress);
     if (!c) {
@@ -1660,7 +1660,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
 
       if (!enough_room) {
         // Then don't do the compaction
-        c->ReleaseCompactionFiles(status);
+        c->ReleaseCompactionFiles(status);	/* 取消Compaction类内inputs_[]标记为正在compacting的状态，以及release这些sst文件 */
         c.reset();
         // m's vars will get set properly at the end of this function,
         // as long as status == CompactionTooLarge
@@ -1678,7 +1678,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
                  : m->manual_end->DebugString().c_str()));
       }
     }
-  } else if (!is_prepicked && !compaction_queue_.empty()) {
+  } else if (!is_prepicked && !compaction_queue_.empty()) {	/* compaction_queue_队列有在等待compact的 */
     if (HasExclusiveManualCompaction()) {
       // Can't compact right now, but try again later
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction()::Conflict");
@@ -1728,7 +1728,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
               ->current()
               ->storage_info()
               ->ComputeCompactionScore(*(c->immutable_cf_options()),
-                                       *(c->mutable_cf_options()));
+                                       *(c->mutable_cf_options()));				/* 重新计算score值 */
           AddToCompactionQueue(cfd);
           ++unscheduled_compactions_;
 
@@ -1873,6 +1873,45 @@ if (!c) {
     ++bg_bottom_compaction_scheduled_;
     env_->Schedule(&DBImpl::BGWorkBottomCompaction, ca, Env::Priority::BOTTOM,
                    this, &DBImpl::UnscheduleCallback);
+  } else if (c->output_level() == 1) {	
+  	/* added by ChengZhilong */
+  	TEST_SYNC_POINT("DBImpl::BackgroundCompaction: output_level == 1, started from Key-Range level");
+	SequenceNumber earliest_write_conflict_snapshot;
+    std::vector<SequenceNumber> snapshot_seqs =
+        snapshots_.GetAll(&earliest_write_conflict_snapshot);
+
+    auto snapshot_checker = snapshot_checker_.get();
+    if (use_custom_gc_ && snapshot_checker == nullptr) {
+      snapshot_checker = DisableGCSnapshotChecker::Instance();
+    }
+    assert(is_snapshot_supported_ || snapshots_.empty());
+
+	CompactionJob compaction_job(
+		job_context->job_id, c.get), immutable_db_options_,
+		env_options_for_compaction_, versions_.get(), &shutting_down_,
+		preserve_deletes_seqnum_.load(), log_buffer, directories_.GetDbDir(),
+		GetDataDir(c->column_family_data(), c->output_path_id()), stats_,
+		&mutex, &error_handler_, snapshot_seqs, earliest_write_conflict_snapshot,
+		snapshot_checker, table_cache_, &event_logger_,
+		c->mutable_cf_options()->paranoid_file_checks,
+		c->mutable_cf_options()->report_bg_io_stats, dbname_,
+		&compaction_job_stats);
+
+	compaction_job.PrepareKeyRange();
+	mutex_.Unlock();
+//	compaction_job.RunKeyRange();
+	compaction_job.Run();
+	TEST_SYNC_POINT("DBImpl::BackgroundCompaction:KeyRangeCompaction: AfterRun");
+	mutex_.Lock();
+
+	status = compaction_job.Install(*c->mutable_cf_options());
+	if (status.ok()) {
+	  InstallSuperVersionAndScheduleWork(c->column_family_data(),
+	  	&job_context->superversion_context, *c->mutable_cf_options(),
+	  	FlushReason::kAutoCompaction);
+	}
+	*made_progress = true;
+  	
   } else {
     int output_level __attribute__((__unused__));
     output_level = c->output_level();
@@ -1913,7 +1952,7 @@ if (!c) {
     *made_progress = true;
   }
   if (c != nullptr) {
-    c->ReleaseCompactionFiles(status);
+    c->ReleaseCompactionFiles(status);		/* 正常compaction工作完成，可以release inputs_[]内所有sst文件的compacting状态；同时注销Compaction *c */
     *made_progress = true;
 
 #ifndef ROCKSDB_LITE

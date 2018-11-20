@@ -86,6 +86,12 @@ class CompactionJob {
   // REQUIRED mutex not held
   Status Run();
 
+  // added by ChengZhilong
+  // REQUIRED: mutex held
+  void PrepareKeyRange();
+  // REQUIRED mutex not held
+  Status RunKeyRange();
+
   // REQUIRED: mutex held
   Status Install(const MutableCFOptions& mutable_cf_options);
 

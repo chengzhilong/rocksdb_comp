@@ -78,6 +78,9 @@ struct ImmutableDBOptions {
   bool preserve_deletes;
   bool two_write_queues;
   bool manual_wal_flush;
+
+  // added by ChengZhilong
+  shared_ptr<NVMWriteCacheOptions> nvm_cache_options;		// need initialized when rocksdb starts.
 };
 
 struct MutableDBOptions {

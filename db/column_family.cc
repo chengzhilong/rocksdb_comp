@@ -36,6 +36,8 @@
 #include "util/compression.h"
 #include "util/sst_file_manager_impl.h"
 
+#include "utilities/nvm_write_cache/hzx/fixed_range_tab.h"
+
 namespace rocksdb {
 
 ColumnFamilyHandleImpl::ColumnFamilyHandleImpl(
@@ -431,11 +433,16 @@ ColumnFamilyData::ColumnFamilyData(
       queued_for_compaction_(false),
       prev_compaction_needed_bytes_(0),
       allow_2pc_(db_options.allow_2pc),
+      fix_range_compaction_picker_(db_options.fix_range_compaction_picker_), /* added by ChengZhilong */
       last_memtable_id_(0) {
   Ref();
 
   // Convert user defined table properties collector factories to internal ones.
   GetIntTblPropCollectorFactory(ioptions_, &int_tbl_prop_collector_factories_);
+
+  // added by ChengZhilong
+  // 先临时这样处理，毕竟FixedRangeTab类构造函数的形参意义不明@HuZexin
+  fix_range_table_picker.reset(new FixedRangeTab(0, nullptr, 0));
 
   // if _dummy_versions is nullptr, then this is a dummy column family.
   if (_dummy_versions != nullptr) {
@@ -910,13 +917,22 @@ void ColumnFamilyData::CreateNewMemtable(
 }
 
 bool ColumnFamilyData::NeedsCompaction() const {
-  return compaction_picker_->NeedsCompaction(current_->storage_info());
+  // added by ChengZhilong
+  // Here we need consider level-0 and level-[others] scores, 
+  // and who is higher, who compacts first.
+  // TODO
+  return (fix_range_compaction_picker_->NeedCompaction() || 
+  	compaction_picker_->NeedsCompaction(current_->storage_info()));
 }
 
 Compaction* ColumnFamilyData::PickCompaction(
     const MutableCFOptions& mutable_options, LogBuffer* log_buffer) {
-  auto* result = compaction_picker_->PickCompaction(
+  auto* result = compaction_picker_->PickKeyRangeCompaction(GetName(),
+  	  mutable_options, current_->storage_info(), log_buffer);
+  if (result == nullptr) {
+  	result = compaction_picker_->PickCompaction(
       GetName(), mutable_options, current_->storage_info(), log_buffer);	/* ?默认调用 LevelCompactionPicker::PickCompaction()? */
+  }
   if (result != nullptr) {
     result->SetInputVersion(current_);
   }
@@ -1206,6 +1222,14 @@ Directory* ColumnFamilyData::GetDataDir(size_t path_id) const {
   assert(path_id < data_dirs_.size());
   return data_dirs_[path_id].get();
 }
+
+// added by ChengZhilong
+// TODO
+// similar to Compaction* LevelCompactionBuilder::PickCompaction(){...}
+Compaction* ColumnFamilyData::KeyRangePickCompaction() {
+	return nullptr;
+}
+
 
 ColumnFamilySet::ColumnFamilySet(const std::string& dbname,
                                  const ImmutableDBOptions* db_options,

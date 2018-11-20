@@ -72,8 +72,8 @@ class TwoLevelIterator : public InternalIterator {
   void InitDataBlock();
 
   TwoLevelIteratorState* state_;
-  IteratorWrapper first_level_iter_;
-  IteratorWrapper second_level_iter_;  // May be nullptr
+  IteratorWrapper first_level_iter_;	// a BlockIter on the SST index block
+  IteratorWrapper second_level_iter_;  // May be nullptr, a BlockIter on a Data block
   Status status_;
   // If second_level_iter is non-nullptr, then "data_block_handle_" holds the
   // "index_value" passed to block_function_ to create the second_level_iter.

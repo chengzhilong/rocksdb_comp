@@ -257,6 +257,11 @@ class Compaction {
   // mark (or clear) all files that are being compacted
   void MarkFilesBeingCompacted(bool mark_as_compacted);
 
+  // added by ChengZhilong
+  void GetLevel01BoundaryKeys(VersionStorageInfo* vstorage,
+	const std::vector<CompactionInputFiles>& inputs, Slice* smallest_user_key,
+	Slice* largest_user_key);
+  
   // get the smallest and largest key present in files to be compacted
   static void GetBoundaryKeys(VersionStorageInfo* vstorage,
                               const std::vector<CompactionInputFiles>& inputs,
@@ -270,6 +275,15 @@ class Compaction {
 
   static bool IsFullCompaction(VersionStorageInfo* vstorage,
                                const std::vector<CompactionInputFiles>& inputs);
+
+  // added by ChengZhilong
+  uint64_t getChunkNum()
+  {
+  	if (start_level_ == 0) {
+		return compact_item_->chunk_num_;
+  	}
+	return 0;
+  }
 
   VersionStorageInfo* input_vstorage_;
 
@@ -293,9 +307,11 @@ class Compaction {
   const bool deletion_compaction_;
 
   // Compaction input files organized by level. Constant after construction
+  // inputs_: level_0 的size=0
   const std::vector<CompactionInputFiles> inputs_;
 
   // A copy of inputs_, organized more closely in memory
+  // input_levels_: level_0 记录为NULL
   autovector<LevelFilesBrief, 2> input_levels_;
 
   // State used to check for number of overlapping grandparent files
@@ -329,6 +345,19 @@ class Compaction {
 
   // Reason for compaction
   CompactionReason compaction_reason_;
+
+
+  // added by ChengZhilong
+  // when start_level_ == 0
+  // struct CompactionItem {
+  // 	FixRange* pending_compacted_range_;
+  // 	Slice start_key_, end_key_;
+  // 	uint64_t range_size_, chunk_num_;
+  // };
+  // Called by CompactionItem* FixedRangeChunkBasedNVMWriteCache::GetCompactionData();
+  // Initialized in VersionSet when compact_level_ == 0, 
+  struct CompactionItem compact_item_;		// record chunk-set info
+  const int chunk_num_;
 };
 
 // Utility function

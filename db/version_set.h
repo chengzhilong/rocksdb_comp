@@ -45,6 +45,8 @@
 #include "port/port.h"
 #include "rocksdb/env.h"
 
+#include "utilities/nvm_write_cache/fixed_range_chunk_based_nvm_write_cache.h"
+
 namespace rocksdb {
 
 namespace log {
@@ -160,8 +162,11 @@ class VersionStorageInfo {
   void UpdateFilesByCompactionPri(CompactionPri compaction_pri);
 
   void GenerateLevel0NonOverlapping();
+
+  // added by ChengZhilong
   bool level0_non_overlapping() const {
-    return level0_non_overlapping_;
+    //return level0_non_overlapping_;
+    return false;
   }
 
   // Check whether each file in this version is bottommost (i.e., nothing in its
@@ -409,6 +414,39 @@ class VersionStorageInfo {
                                      const Slice& largest_key, int last_level,
                                      int last_l0_idx);
 
+/*    bool key_range_based_compaction_;
+  struct CompactionItem compact_item_;		// record chunk-set info
+  const int chunk_num_; 
+*/
+  /* added by ChengZhilong */
+  bool get_key_range_based_compaction() { return key_range_based_compaction_; }
+  void set_key_range_based_compaction() { 
+  	key_range_based_compaction_ = true;
+  }
+
+  void reset_key_range_based_compaction() {
+	key_range_based_compaction_ = false;
+  }
+
+  // added by ChengZhilong
+  // 暂时不支持key-range层的多线程compaction
+  void get_key_range_boundary(InternalKey* smallest, InternalKey* largest)
+  {
+    smallest->Clear(); 		largest->Clear();
+
+//	assert(key_range_based_compaction_ == true);
+
+	*smallest = compaction_item_.start_key_;
+	*largest = compaction_item_.end_key_;
+  }
+
+  void get_slice_key_range_boudary(Slice* smallest_key, Slice* largest_key)
+  {
+  	*smallest_key = compaction_item_.start_key_.user_key();
+	*largest_key = compaction_item_.end_key_.user_key();
+  }
+  
+
  private:
   const InternalKeyComparator* internal_comparator_;
   const Comparator* user_comparator_;
@@ -428,6 +466,21 @@ class VersionStorageInfo {
   // List of files per level, files in each level are arranged
   // in increasing order of keys
   std::vector<FileMetaData*>* files_;
+
+  // added by ChengZhilong 
+  // for level-0 compaction
+  bool key_range_based_compaction_;
+
+/*  
+  typedef struct CompactionItem{
+	  FixedRange* pending_compated_range_;
+	  InternalKey start_key_, end_key_;
+	  uint64_t range_size_, chunk_num_;
+  } CompactionItem;
+ */
+  CompactionItem compaction_item_;
+//  struct CompactionItem compact_item_;		// record chunk-set info
+  const int chunk_num_; 
 
   // Level that L0 data should be compacted to. All levels < base_level_ should
   // be empty. -1 if it is not level-compaction so it's not applicable.
@@ -909,6 +962,12 @@ class VersionSet {
     }
     return min_log_num;
   }
+
+  // Create an iterator that reads over the compaction inputs for level-0 and level-1
+  // The caller should delete the iterator when no longer needed.
+  InternalIterator* MakeKeyRangeBasedInputIterator(
+		const Compaction* c, RangeDelAggregator* range_del_agg,
+		const EnvOptions& env_options_compactions);
 
   // Create an iterator that reads over the compaction inputs for "*c".
   // The caller should delete the iterator when no longer needed.

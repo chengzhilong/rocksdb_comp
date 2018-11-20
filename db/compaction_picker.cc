@@ -48,7 +48,7 @@ bool FindIntraL0Compaction(const std::vector<FileMetaData*>& level_files,
   // pull in files until the amount of compaction work per deleted file begins
   // increasing.
   size_t new_compact_bytes_per_del_file = 0;
-  for (span_len = 1; span_len < level_files.size(); ++span_len) {
+  for (span_len = 1; span_len < level_files.size(); ++span_len) {		/* 遍历level-0的每个sst文件 */
     compact_bytes += level_files[span_len]->fd.file_size;
     new_compact_bytes_per_del_file = compact_bytes / span_len;
     if (level_files[span_len]->being_compacted ||
@@ -136,7 +136,7 @@ CompactionPicker::~CompactionPicker() {}
 
 // Delete this compaction from the list of running compactions.
 void CompactionPicker::ReleaseCompactionFiles(Compaction* c, Status status) {
-  UnregisterCompaction(c);
+  UnregisterCompaction(c);			/* 注销Compaction *c，和 LevelCompactionBuilder::GetCompaction 函数内注册动作相反*/
   if (!status.ok()) {
     c->ResetNextCompactionIndex();
   }
@@ -251,7 +251,7 @@ bool CompactionPicker::ExpandInputsToCleanCut(const std::string& /*cf_name*/,
 
   // If, after the expansion, there are files that are already under
   // compaction, then we must drop/cancel this compaction.
-  if (AreFilesInCompaction(inputs->files)) {
+  if (AreFilesInCompaction(inputs->files)) {				/* 判断是否有file在进行compact */
     return false;
   }
   return true;
@@ -388,6 +388,38 @@ bool CompactionPicker::IsRangeInCompaction(VersionStorageInfo* vstorage,
   return AreFilesInCompaction(inputs);
 }
 
+bool CompactionPicker::SetupLevel1Inputs(
+    const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
+	VersionStorageInfo* vstorage, CompactionInputFiles* inputs,
+	CompactionInputFiles* output_level_inputs,
+	InternalKey& smallest, InternalKey& largest) {
+	assert(inputs->empty() && (inputs->level == 0));
+	assert(output_level_inputs->empty());
+
+	const int input_level = inputs->level;
+	const int output_level = output_level_inputs->level;
+	if (input_level == output_level) {
+		return true;
+	}
+
+	InternalKey* smallest_ = &smallest;
+	InternalKey* largest_ = &largest;
+
+	vstorage->GetOverlappingInputs(output_level, &smallest_, &largest_, &output_level_inputs->files,
+		nullptr, 0);
+	if (AreFilesInCompaction(output_level_inputs->files)) {
+		return false;
+	}
+
+	if (!output_level_inputs->empty()) {
+    	if (!ExpandInputsToCleanCut(cf_name, vstorage, output_level_inputs)) {
+      		return false;
+    	}
+  	}
+
+	return true;
+}
+
 // Populates the set of inputs of all other levels that overlap with the
 // start level.
 // Now we assume all levels except start level and output level are empty.
@@ -403,7 +435,10 @@ bool CompactionPicker::SetupOtherInputs(
     VersionStorageInfo* vstorage, CompactionInputFiles* inputs,
     CompactionInputFiles* output_level_inputs, int* parent_index,
     int base_index) {
-  assert(!inputs->empty());
+    // added by ChengZhilong
+/*  assert(!inputs->empty()); */
+  assert(inputs->empty() ^ (inputs->level > 0));
+
   assert(output_level_inputs->empty());
   const int input_level = inputs->level;
   const int output_level = output_level_inputs->level;
@@ -421,7 +456,9 @@ bool CompactionPicker::SetupOtherInputs(
   InternalKey smallest, largest;
 
   // Get the range one last time.
-  GetRange(*inputs, &smallest, &largest);
+  // added by ChengZhilong
+  if (input_level > 0)
+	  GetRange(*inputs, &smallest, &largest);
 
   // Populate the set of next-level files (inputs_GetOutputLevelInputs()) to
   // include in compaction
@@ -1056,7 +1093,9 @@ bool LevelCompactionPicker::NeedsCompaction(
   if (!vstorage->FilesMarkedForCompaction().empty()) {
     return true;
   }
-  for (int i = 0; i <= vstorage->MaxInputLevel(); i++) {
+  // added by ChengZhilong
+  for (int i = 1; i <= vstorage->MaxInputLevel(); i++) {
+  //for (int i = 0; i <= vstorage->MaxInputLevel(); i++) {
     if (vstorage->CompactionScore(i) >= 1) {
       return true;
     }
@@ -1084,9 +1123,13 @@ class LevelCompactionBuilder {
   // Pick and return a compaction.
   Compaction* PickCompaction();
 
+  Compaction* PickKeyRangeCompaction();
+
   // Pick the initial files to compact to the next level. (or together
   // in Intra-L0 compactions)
   void SetupInitialFiles();
+
+  bool SetupKeyRangeInitialFiles();
 
   // If the initial files are from L0 level, pick other L0
   // files if needed.
@@ -1097,7 +1140,9 @@ class LevelCompactionBuilder {
   bool SetupOtherInputsIfNeeded();
 
   Compaction* GetCompaction();
+  Compaction* GetKeyRangeCompaction();
 
+  bool PickKeyRangeFileToCompact();
   // For the specfied level, pick a file that we want to compact.
   // Returns false if there is no file to compact.
   // If it returns true, inputs->files.size() will be exactly one.
@@ -1180,11 +1225,28 @@ void LevelCompactionBuilder::PickExpiredTtlFiles() {
   start_level_inputs_.files.clear();
 }
 
+bool LevelCompactionBuilder::SetupKeyRangeInitialFiles() {
+  assert(start_level == 0);
+
+  output_level_ = 1;
+  
+  if (!PickKeyRangeFileToCompact()) {
+	return false;	
+  }
+
+  compaction_reason_ = CompactionReason::kLevelMaxLevelSize;
+  return true;
+}
+
 void LevelCompactionBuilder::SetupInitialFiles() {
   // Find the compactions by size on all levels.
   bool skipped_l0_to_base = false;
-  for (int i = 0; i < compaction_picker_->NumberLevels() - 1; i++) {
-    start_level_score_ = vstorage_->CompactionScore(i);			/* 对每个level都会预先计算好start_level_score值 */
+  /* added by ChengZhilong 
+   * for (int i = 0; ... -> for (int i = 1; ... 
+   */
+  //for (int i = 0; i < compaction_picker_->NumberLevels() - 1; i++) {
+  for (int i = 1; i < compaction_picker_->NumberLevels() - 1; i++) {
+    start_level_score_ = vstorage_->CompactionScore(i);			/* 对每个level都会预先计算好start_level_score值，并排好序:score值大的靠前 */
     start_level_ = vstorage_->CompactionScoreLevel(i);
     assert(i == 0 || start_level_score_ <= vstorage_->CompactionScore(i - 1));
     if (start_level_score_ >= 1) {
@@ -1196,7 +1258,7 @@ void LevelCompactionBuilder::SetupInitialFiles() {
       }
       output_level_ =
           (start_level_ == 0) ? vstorage_->base_level() : start_level_ + 1;
-      if (PickFileToCompact()) {
+      if (PickFileToCompact()) {						/* 遍历查找start_level_层的且尚未compact的sst文件 */
         // found the compaction!
         if (start_level_ == 0) {
           // L0 score = `num L0 files` / `level0_file_num_compaction_trigger`
@@ -1271,8 +1333,13 @@ void LevelCompactionBuilder::SetupInitialFiles() {
   }
 }
 
+/* added by ChengZhilong */
+/*
+ * if (start_level == 0 ....) -> if (start_level > 0)
+ */
 bool LevelCompactionBuilder::SetupOtherL0FilesIfNeeded() {
-  if (start_level_ == 0 && output_level_ != 0) {
+  if (start_level > 0) {
+/*  if (start_level_ == 0 && output_level_ != 0) { */
     return compaction_picker_->GetOverlappingL0Files(
         vstorage_, &start_level_inputs_, output_level_, &parent_index_);
   }
@@ -1316,18 +1383,90 @@ bool LevelCompactionBuilder::SetupOtherInputsIfNeeded() {
   return true;
 }
 
+// For Key-Range Compaction
+Compaction* LevelCompactionBuilder::PickKeyRangeCompaction() {
+/*  if (!vstorage_->get_key_range_based_compaction()) {
+		return nullptr;
+  }
+ */
+  // 内部设置为不能多线程，当前有chunk在进行compaction，则此处应该会返回nullptr
+  if (!SetupKeyRangeInitialFiles())	// start_level_ == 0, output_level_ == 1
+  {
+	return nullptr;
+  }
+  if (0) {						// 这里需要标注下KeyRange是否正在进行compact，防止多线程冲突
+    return nullptr;
+  }
+  
+  assert(start_level_ >= 0 && output_level_ >= 0);
+
+  // 指定level-1的sst文件，或者为0（找不到或本身为0），或者为1个，或者为多个
+  // ... ...
+
+  InternalKey smallest, largest;		// get from KeyRange
+  vstorage_->get_key_range_boundary(&smallest, &largest);
+
+  output_level_inputs_.level = output_level_;
+  if (!compaction_picker_->SetupLevel1Inputs(cf_name_, mutable_cf_options_, vstorage_, &start_level_inputs_,
+            &output_level_inputs_, smallest, largest))
+  {
+	return nullptr;
+  }
+
+  compaction_inputs_.push_back(start_level_inputs_);
+  if (!output_level_inputs_.empty()) {
+  	compaction_inputs_.push_back(output_level_inputs_);
+  }
+
+  Compaction* c = GetKeyRangeCompaction();
+
+  TEST_SYNC_POINT_CALLBACK("LevelCompactionPicker::PickCompaction:Return", c);
+
+  return c;
+}
+
+Compaction* LevelCompactionBuilder::GetKeyRangeCompaction()
+{
+	uint64_t target_file_size = mutable_cf_options_.max_file_size[1];
+	// compaction_inputs_
+	// 
+	compaction_reason_ = CompactionReason::kLevelL0FilesNum;
+	start_level_score_ = 1.0;		// Key-Range, just for log
+
+	auto c = new Compaction(
+		vstorage_, ioptions_, mutable_cf_options_, std::move(compaction_inputs_),
+      output_level_, target_file_size,
+      mutable_cf_options_.max_compaction_bytes,
+      GetPathId(ioptions_, mutable_cf_options_, output_level_),
+      GetCompressionType(ioptions_, vstorage_, mutable_cf_options_,
+                         output_level_, vstorage_->base_level()),
+      GetCompressionOptions(ioptions_, vstorage_, output_level_),
+      /* max_subcompactions */ 0, std::move(grandparents_), is_manual_,
+      start_level_score_, false /* deletion_compaction */, compaction_reason_);
+
+	compaction_picker_->RegisterCompaction(c);
+
+	// recalculate score
+
+	vstorage_->ComputeCompactionScore(ioptions_, mutable_cf_options_);
+
+	return c;
+}
+
 Compaction* LevelCompactionBuilder::PickCompaction() {
   // Pick up the first file to start compaction. It may have been extended
   // to a clean cut.
-  SetupInitialFiles();
-  if (start_level_inputs_.empty()) {
+  SetupInitialFiles();					/* 该函数只会在PickCompaction()函数内被调用 */
+  if (start_level_inputs_.empty()) {	/* 没找到合适的compaction，或当前L0层有在进行compaction等其他原因，则只能ship */
     return nullptr;
   }
   assert(start_level_ >= 0 && output_level_ >= 0);
 
   // If it is a L0 -> base level compaction, we need to set up other L0
   // files if needed.
-  if (!SetupOtherL0FilesIfNeeded()) {
+  // Go from level 0 to highest level to pick the first level, Lb, that 
+  // the score of this level larger than 1 as the compaction base level
+  if (!SetupOtherL0FilesIfNeeded()) {			/* 若level-0选中的sst文件之间没有Key重叠，则返回nullptr */
     return nullptr;
   }
 
@@ -1358,11 +1497,11 @@ Compaction* LevelCompactionBuilder::GetCompaction() {
                          output_level_, vstorage_->base_level()),
       GetCompressionOptions(ioptions_, vstorage_, output_level_),
       /* max_subcompactions */ 0, std::move(grandparents_), is_manual_,
-      start_level_score_, false /* deletion_compaction */, compaction_reason_);
+      start_level_score_, false /* deletion_compaction */, compaction_reason_);	/* 内部调用了MarkFilesBegingCompacted()函数，参数为true */
 
   // If it's level 0 compaction, make sure we don't execute any other level 0
   // compactions in parallel
-  compaction_picker_->RegisterCompaction(c);
+  compaction_picker_->RegisterCompaction(c);		/* 和UngisterCompaction()函数功能相反 */
 
   // Creating a compaction influences the compaction score because the score
   // takes running compactions into account (by skipping files that are already
@@ -1426,6 +1565,30 @@ uint32_t LevelCompactionBuilder::GetPathId(
   return p;
 }
 
+
+/* 返回为true:可以进行compact；false：不能进行compact */
+/* 此处设置为key-range不能多线程，后续会再改 */
+bool LevelCompactionBuilder::PickKeyRangeFileToCompact() {
+  assert(start_level_ == 0);
+  assert(output_level_ == 1);
+
+  if (start_level_ == 0 &&
+      !compaction_picker_->level0_compactions_in_progress()->empty()) {
+    TEST_SYNC_POINT("LevelCompactionPicker::PickCompactionBySize:0");
+    return false;
+  }
+
+  start_level_inputs_.clear();
+
+  start_level_inputs_.level = start_level_;
+
+  InternalKey smallest, largest;		// get from KeyRange
+  vstorage_->get_key_range_boundary(&smallest, &largest);
+
+  //compaction_picker_->GetRange(start_level_inputs_, &smallest, &largest);
+  return true;
+}
+
 bool LevelCompactionBuilder::PickFileToCompact() {
   // level 0 files are overlapping. So we cannot pick more
   // than one concurrent compactions at this level. This
@@ -1450,17 +1613,17 @@ bool LevelCompactionBuilder::PickFileToCompact() {
 
   unsigned int cmp_idx;
   for (cmp_idx = vstorage_->NextCompactionIndex(start_level_);
-       cmp_idx < file_size.size(); cmp_idx++) {
+       cmp_idx < file_size.size(); cmp_idx++) {		/* 遍历要进行compact的所有sst文件 */
     int index = file_size[cmp_idx];
     auto* f = level_files[index];
 
     // do not pick a file to compact if it is being compacted
     // from n-1 level.
-    if (f->being_compacted) {
+    if (f->being_compacted) {						/* 若正在compact，则skip */
       continue;
     }
 
-    start_level_inputs_.files.push_back(f);
+    start_level_inputs_.files.push_back(f);			/* 保存待compact的sst文件到start_level_inputs_ */
     start_level_inputs_.level = start_level_;
     if (!compaction_picker_->ExpandInputsToCleanCut(cf_name_, vstorage_,
                                                     &start_level_inputs_) ||
@@ -1483,7 +1646,7 @@ bool LevelCompactionBuilder::PickFileToCompact() {
     CompactionInputFiles output_level_inputs;
     output_level_inputs.level = output_level_;
     vstorage_->GetOverlappingInputs(output_level_, &smallest, &largest,
-                                    &output_level_inputs.files);
+                                    &output_level_inputs.files);		/* 获取输出output_level的所有与key-range重叠的sst文件列表 */
     if (!output_level_inputs.empty() &&
         !compaction_picker_->ExpandInputsToCleanCut(cf_name_, vstorage_,
                                                     &output_level_inputs)) {
@@ -1500,10 +1663,11 @@ bool LevelCompactionBuilder::PickFileToCompact() {
   return start_level_inputs_.size() > 0;
 }
 
+/* L0 -> L0 compaction,将L0的sst文件compact成一个large file */
 bool LevelCompactionBuilder::PickIntraL0Compaction() {
   start_level_inputs_.clear();
   const std::vector<FileMetaData*>& level_files =
-      vstorage_->LevelFiles(0 /* level */);
+      vstorage_->LevelFiles(0 /* level */);		/* 获取Level-0的所有sst文件的filemetadata */
   if (level_files.size() <
           static_cast<size_t>(
               mutable_cf_options_.level0_file_num_compaction_trigger + 2) ||
@@ -1524,6 +1688,15 @@ Compaction* LevelCompactionPicker::PickCompaction(
                                  mutable_cf_options, ioptions_);
   return builder.PickCompaction();			/* 对应的 LevelCompactionBuilder::PickCompaction() */
 }
+
+Compaction* LevelCompactionPicker::PickKeyRangeCompaction(
+	const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
+	VersionStorageInfo* vstorage, LogBuffer* log_buffer) {
+  LevelCompactionBuilder builder(cf_name, vstorage, this, log_buffer,
+									 mutable_cf_options, ioptions_);
+  return builder.PickKeyRangeCompaction();			/* 对应的 LevelCompactionBuilder::PickCompaction() */
+}
+
 
 #ifndef ROCKSDB_LITE
 bool FIFOCompactionPicker::NeedsCompaction(

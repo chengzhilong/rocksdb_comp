@@ -40,6 +40,29 @@ void Compaction::SetInputVersion(Version* _input_version) {
   edit_.SetColumnFamily(cfd_->GetID());
 }
 
+/* 参数smallest_user_key和largest_user_key应该在构造函数已经初始化完毕，
+ * 且为key-range层的smallest_key和largest_key
+ */
+void Compaction::GetLevel01BoundaryKeys(
+	VersionStorageInfo* vstorage,
+	const std::vector<CompactionInputFiles>& inputs, Slice* smallest_user_key,
+	Slice* largest_user_key) {
+	const Comparator* ucmp = vstorage->InternalComparator()->user_comparator();
+	for (size_t i = 0; i < inputs.size(); i++) {
+		if (inputs[i].file.empty()) {
+			continue;
+		}
+		const Slice& start_user_key = inputs[i].files[0]->smallest.user_key();
+		if (ucmp->Compare(start_user_key, *smallest_user_key) < 0) {
+			*smallest_user_key = start_user_key;
+		}
+		const Slice& end_user_key = inputs[i].files.back()->largest.user_key();
+		if (ucmp->Compare(end_user_key, *largest_user_key) > 0) {
+			*largest_user_key = end_user_key;
+		}
+	}
+}
+
 void Compaction::GetBoundaryKeys(
     VersionStorageInfo* vstorage,
     const std::vector<CompactionInputFiles>& inputs, Slice* smallest_user_key,
@@ -163,7 +186,7 @@ Compaction::Compaction(VersionStorageInfo* vstorage,
       is_manual_compaction_(_manual_compaction),
       is_trivial_move_(false),
       compaction_reason_(_compaction_reason) {
-  MarkFilesBeingCompacted(true);
+  MarkFilesBeingCompacted(true);					/* 构造Compaction时，将inputs_[]所有sst文件都标记为正在compacting的状态 */
   if (is_manual_compaction_) {
     compaction_reason_ = CompactionReason::kManualCompaction;
   }
@@ -182,11 +205,17 @@ Compaction::Compaction(VersionStorageInfo* vstorage,
     input_levels_.resize(num_input_levels());
     for (size_t which = 0; which < num_input_levels(); which++) {
       DoGenerateLevelFilesBrief(&input_levels_[which], inputs_[which].files,
-                                &arena_);
+                                &arena_);	/* 记录inputs_[]每个sst文件的smallest_key, largest_key, fd和fmd等信息到input_levels_[] */
     }
   }
-
-  GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_);
+  if (start_level_ == 0) {
+  	// 需要给smallest_user_key_和largest_user_key_赋初值
+  	vstorage->get_slice_key_range_boudary(&smallest_user_key_, &largest_user_key_);
+	GetLevel01BoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_);
+  } else {
+  	/* 获取inputs_保存的所有sst文件中记录的最小key和最大key，分别存放在smallest_user_key_和largest_user_key_ */
+  	GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_);
+  }
 }
 
 Compaction::~Compaction() {
@@ -221,7 +250,9 @@ bool Compaction::IsTrivialMove() const {
   // filter to be applied to that level, and thus cannot be a trivial move.
 
   // Check if start level have files with overlapping ranges
-  if (start_level_ == 0 && input_vstorage_->level0_non_overlapping() == false) {
+  // added by ChengZhilong
+  if (start_level_ == 0) {
+//  if (start_level_ == 0 && input_vstorage_->level0_non_overlapping() == false) {
     // We cannot move files from L0 to L1 if the files are overlapping
     return false;
   }
@@ -307,6 +338,11 @@ bool Compaction::KeyNotExistsBeyondOutputLevel(
 }
 
 // Mark (or clear) each file that is being compacted
+/*
+ * 参数mark_as_compacted: true, 则表示当前inputs_[]的所有文件不在compacting，然后置为false；
+ * false，则表示当前inputs_[]的所有文件在compacting，然后置为true
+ * 调用者Compaction类构造函数，Compaction::ReleaseCompactionFiles 函数
+ */
 void Compaction::MarkFilesBeingCompacted(bool mark_as_compacted) {
   for (size_t i = 0; i < num_input_levels(); i++) {
     for (size_t j = 0; j < inputs_[i].size(); j++) {
@@ -355,7 +391,7 @@ uint64_t Compaction::CalculateTotalInputSize() const {
 }
 
 void Compaction::ReleaseCompactionFiles(Status status) {
-  MarkFilesBeingCompacted(false);
+  MarkFilesBeingCompacted(false);									/* 将Compaction类内的inputs_[]所有sst文件状态标记为未进行compacting */
   cfd_->compaction_picker()->ReleaseCompactionFiles(this, status);
 }
 

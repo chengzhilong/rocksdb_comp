@@ -1413,6 +1413,7 @@ void Version::UpdateAccumulatedStats(bool update_stats) {
   storage_info_.ComputeCompensatedSizes();
 }
 
+/* 计算经过补偿后(deleted entry)的file size */
 void VersionStorageInfo::ComputeCompensatedSizes() {
   static const int kDeletionWeightOnCompaction = 2;
   uint64_t average_value_size = GetAverageValueSize();
@@ -1444,6 +1445,7 @@ void VersionStorageInfo::ComputeCompensatedSizes() {
   }
 }
 
+/* 这里-2，是因为bottommost level进行compaction时会单独考虑 */
 int VersionStorageInfo::MaxInputLevel() const {
   if (compaction_style_ == kCompactionStyleLevel) {
     return num_levels() - 2;
@@ -1486,7 +1488,7 @@ void VersionStorageInfo::EstimateCompactionBytesNeeded(
   bool level0_compact_triggered = false;
   if (static_cast<int>(files_[0].size()) >=
           mutable_cf_options.level0_file_num_compaction_trigger ||
-      level_size >= mutable_cf_options.max_bytes_for_level_base) {
+      level_size >= mutable_cf_options.max_bytes_for_level_base) {		/* level-0 触发compact，则size为level-0的总size */
     level0_compact_triggered = true;
     estimated_compaction_needed_bytes_ = level_size;
     bytes_compact_to_next_level = level_size;
@@ -1496,7 +1498,7 @@ void VersionStorageInfo::EstimateCompactionBytesNeeded(
 
   // Level 1 and up.
   uint64_t bytes_next_level = 0;
-  for (int level = base_level(); level <= MaxInputLevel(); level++) {
+  for (int level = base_level(); level <= MaxInputLevel(); level++) {	/* 从base_level开始，直到MaxInputLevel() */
     level_size = 0;
     if (bytes_next_level > 0) {
 #ifndef NDEBUG
@@ -1509,7 +1511,7 @@ void VersionStorageInfo::EstimateCompactionBytesNeeded(
       level_size = bytes_next_level;
       bytes_next_level = 0;
     } else {
-      for (auto* f : files_[level]) {
+      for (auto* f : files_[level]) {									/* 获取base_level的所有sst文件大小 */
         level_size += f->fd.GetFileSize();
       }
     }
@@ -1571,10 +1573,14 @@ uint32_t GetExpiredTtlFilesCount(const ImmutableCFOptions& ioptions,
 }
 }  // anonymous namespace
 
+// modified by ChengZhilong
+// for (int level = 0; ...) -> for(int level = 1; ...)
+// for (int i = 0; ...) -> for (int i = 1; ...)
 void VersionStorageInfo::ComputeCompactionScore(
     const ImmutableCFOptions& immutable_cf_options,
     const MutableCFOptions& mutable_cf_options) {
-  for (int level = 0; level <= MaxInputLevel(); level++) {
+/*  for (int level = 0; level <= MaxInputLevel(); level++) { */
+  for (int level = 1; level <= MaxInputLevel(); level++) {
     double score;
     if (level == 0) {
       // We treat level-0 specially by bounding the number of files
@@ -1652,7 +1658,8 @@ void VersionStorageInfo::ComputeCompactionScore(
 
   // sort all the levels based on their score. Higher scores get listed
   // first. Use bubble sort because the number of entries are small.
-  for (int i = 0; i < num_levels() - 2; i++) {
+  //for (int i = 0; i < num_levels() - 2; i++) {
+  for (int i = 1; i < num_levels() - 2; i++) {			/* 按照score值从大到小进行冒泡排序 */
     for (int j = i + 1; j < num_levels() - 1; j++) {
       if (compaction_score_[i] < compaction_score_[j]) {
         double score = compaction_score_[i];
@@ -1664,8 +1671,8 @@ void VersionStorageInfo::ComputeCompactionScore(
       }
     }
   }
-  ComputeFilesMarkedForCompaction();
-  ComputeBottommostFilesMarkedForCompaction();
+  ComputeFilesMarkedForCompaction();	/* level 0 ~ bottomlevel-1，获取标记为要compact且未compact的sst文件插入到files_marked_for_compaction_里 */
+  ComputeBottommostFilesMarkedForCompaction();	/* 与上行函数功能类似，不过只针对bottommost level而言 */
   if (mutable_cf_options.ttl > 0) {
     ComputeExpiredTtlFiles(immutable_cf_options, mutable_cf_options.ttl);
   }
@@ -1679,16 +1686,20 @@ void VersionStorageInfo::ComputeFilesMarkedForCompaction() {
   // Do not include files from the last level with data
   // If table properties collector suggests a file on the last level,
   // we should not move it to a new level.
-  for (int level = num_levels() - 1; level >= 1; level--) {
+  for (int level = num_levels() - 1; level >= 1; level--) {		/* 获得当前LSM-Tree的最大深度-1，即last_qualify_level */
     if (!files_[level].empty()) {
       last_qualify_level = level - 1;
       break;
     }
   }
 
-  for (int level = 0; level <= last_qualify_level; level++) {
+  /* added by ChengZhilong
+   * for (int level = 0; ...) -> for (int level = 1; ...)
+   */
+  for (int level = 1; level <= last_qualify_level; level++) {
+  //for (int level = 0; level <= last_qualify_level; level++) {	/* 从level-0 ~ last_qualify_level，记录正在compaction的sst文件 */
     for (auto* f : files_[level]) {
-      if (!f->being_compacted && f->marked_for_compaction) {
+      if (!f->being_compacted && f->marked_for_compaction) {	/* being_compacted参数主要在Compaction::MarkFilesBeingCompacted函数内修改 */
         files_marked_for_compaction_.emplace_back(level, f);
       }
     }
@@ -1744,7 +1755,7 @@ void VersionStorageInfo::AddFile(int level, FileMetaData* f, Logger* info_log) {
 #ifndef NDEBUG
   if (level > 0 && !level_files->empty() &&
       internal_comparator_->Compare(
-          (*level_files)[level_files->size() - 1]->largest, f->smallest) >= 0) {
+          (*level_files)[level_files->size() - 1]->largest, f->smallest) >= 0) {	/* DEBUG模式，则做类似于CheckConsistency()的检查 */
     auto* f2 = (*level_files)[level_files->size() - 1];
     if (info_log != nullptr) {
       Error(info_log, "Adding new file %" PRIu64
@@ -1762,7 +1773,7 @@ void VersionStorageInfo::AddFile(int level, FileMetaData* f, Logger* info_log) {
   (void)info_log;
 #endif
   f->refs++;
-  level_files->push_back(f);
+  level_files->push_back(f);		/* 外面接口调用该函数时，level_files已经是key有序的，可以不用排序了，直接从末尾追加即可 */
 }
 
 // Version::PrepareApply() need to be called before calling the function, or
@@ -2033,6 +2044,7 @@ bool VersionStorageInfo::OverlapInLevel(int level,
 // If hint_index is specified, then it points to a file in the
 // overlapping range.
 // The file_index returns a pointer to any file in an overlapping range.
+/* level: ouput_level */
 void VersionStorageInfo::GetOverlappingInputs(
     int level, const InternalKey* begin, const InternalKey* end,
     std::vector<FileMetaData*>* inputs, int hint_index, int* file_index,
@@ -2054,13 +2066,13 @@ void VersionStorageInfo::GetOverlappingInputs(
     *file_index = -1;
   }
   const Comparator* user_cmp = user_comparator_;
-  if (level > 0) {
+  if (level > 0) {			/* 若output_level == 1，直接调用这个函数就可以了 */
     GetOverlappingInputsRangeBinarySearch(level, begin, end, inputs,
                                           hint_index, file_index);
     return;
   }
 
-  for (size_t i = 0; i < level_files_brief_[level].num_files; ) {
+  for (size_t i = 0; i < level_files_brief_[level].num_files; ) {		/* 遍历output_level上每个sst文件 */
     FdWithKeyRange* f = &(level_files_brief_[level].files[i++]);
     const Slice file_start = ExtractUserKey(f->smallest_key);
     const Slice file_limit = ExtractUserKey(f->largest_key);
@@ -2843,16 +2855,17 @@ Status VersionSet::ProcessManifestWrites(
         builder = builder_guards.back()->version_builder();
       }
       assert(builder != nullptr);  // make checker happy
-      for (const auto& e : last_writer->edit_list) {
-        LogAndApplyHelper(last_writer->cfd, builder, version, e, mu);
-        batch_edits.push_back(e);
+      for (const auto& e : last_writer->edit_list) {			/* 对于每个CF,获取该version下的所有VersionEdit，保存到batch_edits */
+        LogAndApplyHelper(last_writer->cfd, builder, version, e, mu);	/* apply 每一个VersionEdit到Vesion上 */
+        batch_edits.push_back(e);								/* 这里预先保存，只是为了后面检验每个完成的状态 */
       }
     }
     for (int i = 0; i < static_cast<int>(versions.size()); ++i) {
       assert(!builder_guards.empty() &&
              builder_guards.size() == versions.size());
       auto* builder = builder_guards[i]->version_builder();
-      builder->SaveTo(versions[i]->storage_info());
+	  /* 将当前version->base_storage_保存到versions[i]->storage_info() */
+      builder->SaveTo(versions[i]->storage_info());				/* VersionBuilder::SaveTo(...) -> VersionBuilder::Rep::SaveTo() */
     }
   }
 
@@ -3094,7 +3107,7 @@ Status VersionSet::LogAndApply(
     const ColumnFamilyOptions* new_cf_options) {
   mu->AssertHeld();
   int num_edits = 0;
-  for (const auto& elist : edit_lists) {
+  for (const auto& elist : edit_lists) {			/* 统计有多少个VersionEdit:记录着added/deleted的sst文件 */
     num_edits += static_cast<int>(elist.size());
   }
   if (num_edits == 0) {
@@ -3120,14 +3133,14 @@ Status VersionSet::LogAndApply(
     assert(static_cast<size_t>(num_cfds) == mutable_cf_options_list.size());
     assert(static_cast<size_t>(num_cfds) == edit_lists.size());
   }
-  for (int i = 0; i < num_cfds; ++i) {
+  for (int i = 0; i < num_cfds; ++i) {			/* 不同cfd都有自己的sst文件和memtable，自然也有各自的Manifest文件 */
     writers.emplace_back(mu, column_family_datas[i], mutable_cf_options_list[i],
                          edit_lists[i]);
     manifest_writers_.push_back(&writers[i]);
   }
   assert(!writers.empty());
   ManifestWriter& first_writer = writers.front();
-  while (!first_writer.done && &first_writer != manifest_writers_.front()) {
+  while (!first_writer.done && &first_writer != manifest_writers_.front()) {	/* 等待每个ManifestWriter做完 */
     first_writer.cv.Wait();
   }
   if (first_writer.done) {
@@ -3995,6 +4008,9 @@ Status VersionSet::WriteSnapshot(log::Writer* log) {
 // (a,b) then (b,c) then (c,d). Knowing this, an optimization is possible where
 // we avoid doing binary search for the keys b and c twice and instead somehow
 // maintain state of where they first appear in the files.
+/* 函数返回的就是遍历[start_level, end_level)中的每一层，获取key
+ * 在[start, end]之间的size，累加后作为函数返回值 
+ */
 uint64_t VersionSet::ApproximateSize(Version* v, const Slice& start,
                                      const Slice& end, int start_level,
                                      int end_level) {
@@ -4016,7 +4032,7 @@ uint64_t VersionSet::ApproximateSize(Version* v, const Slice& start,
       continue;
     }
 
-    if (!level) {
+    if (!level) {					/* level==0，则调用专用函数ApproximateSizeLevel0 */
       // level 0 data is sorted order, handle the use case explicitly
       size += ApproximateSizeLevel0(v, files_brief, start, end);
       continue;
@@ -4028,25 +4044,25 @@ uint64_t VersionSet::ApproximateSize(Version* v, const Slice& start,
     // identify the file position for starting key
     const uint64_t idx_start = FindFileInRange(
         v->cfd_->internal_comparator(), files_brief, start,
-        /*start=*/0, static_cast<uint32_t>(files_brief.num_files - 1));
+        /*start=*/0, static_cast<uint32_t>(files_brief.num_files - 1));	/* 找出start_key出现的sst文件的索引值idx_start,该函数使用二分查找 */
     assert(idx_start < files_brief.num_files);
 
     // scan all files from the starting position until the ending position
     // inferred from the sorted order
     for (uint64_t i = idx_start; i < files_brief.num_files; i++) {
       uint64_t val;
-      val = ApproximateSize(v, files_brief.files[i], end);
+      val = ApproximateSize(v, files_brief.files[i], end);				/* 遍历从idx_start到最后一个的每个files，获取key值小于end的大小 */
       if (!val) {
         // the files after this will not have the range
         break;
       }
 
-      size += val;
+      size += val;					/* 值不断累加 */
 
       if (i == idx_start) {
         // subtract the bytes needed to be scanned to get to the starting
         // key
-        val = ApproximateSize(v, files_brief.files[i], start);
+        val = ApproximateSize(v, files_brief.files[i], start);			/* 还需要减去第一个文件在start_key前面部分的大小 */
         assert(size >= val);
         size -= val;
       }
@@ -4067,21 +4083,24 @@ uint64_t VersionSet::ApproximateSizeLevel0(Version* v,
     const uint64_t start = ApproximateSize(v, files_brief.files[i], key_start);
     const uint64_t end = ApproximateSize(v, files_brief.files[i], key_end);
     assert(end >= start);
-    size += end - start;
+    size += end - start;	/* 每个sst文件在[key_start, key_end]之间的大小，就是->key_end的大小减去->key_start的大小 */
   }
   return size;
 }
 
+/*
+ * 获取f指向的sst文件内对应key序列在指定的参数key前面的总size
+ */
 uint64_t VersionSet::ApproximateSize(Version* v, const FdWithKeyRange& f,
                                      const Slice& key) {
   // pre-condition
   assert(v);
 
   uint64_t result = 0;
-  if (v->cfd_->internal_comparator().Compare(f.largest_key, key) <= 0) {
+  if (v->cfd_->internal_comparator().Compare(f.largest_key, key) <= 0) {	/* f的sst文件largest_key < key，则result就是sst的size */
     // Entire file is before "key", so just add the file size
     result = f.fd.GetFileSize();
-  } else if (v->cfd_->internal_comparator().Compare(f.smallest_key, key) > 0) {
+  } else if (v->cfd_->internal_comparator().Compare(f.smallest_key, key) > 0) {	/* sst文件smallest_key > key，则result = 0 */
     // Entire file is after "key", so ignore
     result = 0;
   } else {
@@ -4140,6 +4159,45 @@ void VersionSet::AddLiveFiles(std::vector<FileDescriptor>* live_list) {
       current->AddLiveFiles(live_list);
     }
   }
+}
+
+/*
+ * Only level-0 Compaction can call it. It's similar to MakeInputIterator
+ */
+// Compaction c在函数LevelCompactionBuilder::PickCompaction被初始化
+// added by ChengZhilong
+InternalIterator* VersionSet::MakeKeyRangeBasedInputIterator(
+		const Compaction*c, RangeDelAggregator* range_del_agg,
+		const EnvOptions& env_options_compactions) {
+	auto cfd = c->column_family_data();
+	ReadOptions read_options;
+	read_options.verify_checksums = true;
+	read_options.fill_cache = false;
+	read_options.total_order_seek = true;
+
+	// TODO
+	const size_t space = c->num_input_levels();		// 若level-1没重叠的sst文件，则为1；否则为2
+	InternalIterator** list = new InternalIterator* [space];
+	size_t num = 0;
+	
+	list[num++] = cfd->fixed_range_table()->NewIterator(cfd, nullptr);
+	for (size_t which = 1; which < space; which++) {
+		list[num++] = new LevelIterator(
+			cfd->table_cache(), read_options, env_options_compactions,
+            cfd->internal_comparator(), c->input_levels(which),
+            c->mutable_cf_options()->prefix_extractor.get(),
+            false /* should_sample */,
+            nullptr /* no per level latency histogram */,
+            true /* for_compaction */, false /* skip_filters */,
+            static_cast<int>(which) /* level */, range_del_agg);
+	}
+
+	assert(num <= space);
+	InternalIterator* result =
+      NewMergingIterator(&c->column_family_data()->internal_comparator(), list,
+                         static_cast<int>(num));
+	delete[] list;
+	return result;
 }
 
 InternalIterator* VersionSet::MakeInputIterator(
@@ -4240,7 +4298,14 @@ bool VersionSet::VerifyCompactionFileConsistency(Compaction* c) {
     }
   }
 
-  for (size_t input = 0; input < c->num_input_levels(); ++input) {
+  // added by ChengZhilong
+  size_t input;
+  if (c->start_level() == 0) 
+  	input = 1;
+  else 
+  	input = 0;
+  for (; input < c->num_input_levels(); ++input) {
+//  for (size_t input = 0; input < c->num_input_levels(); ++input) {
     int level = c->level(input);
     for (size_t i = 0; i < c->num_input_files(input); ++i) {
       uint64_t number = c->input(input, i)->fd.GetNumber();

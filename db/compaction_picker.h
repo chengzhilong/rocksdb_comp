@@ -44,6 +44,11 @@ class CompactionPicker {
                                      VersionStorageInfo* vstorage,
                                      LogBuffer* log_buffer) = 0;
 
+  virtual Compaction* PickKeyRangeCompaction(const std::string& cf_name, 
+  									const MutableCFOptions& mutable_cf_options,
+  									VersionStorageInfo& vstorage,
+  									LogBuffer* log_buffer);
+
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns nullptr if there is nothing in that
   // level that overlaps the specified range.  Caller should delete
@@ -163,6 +168,13 @@ class CompactionPicker {
   bool FilesRangeOverlapWithCompaction(
       const std::vector<CompactionInputFiles>& inputs, int level) const;
 
+  bool SetupLevel1Inputs(
+		  const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
+		  VersionStorageInfo* vstorage, CompactionInputFiles* inputs,
+		  CompactionInputFiles* output_level_inputs, InternalKey& smallest, 
+		  InternalKey& largest);
+
+
   bool SetupOtherInputs(const std::string& cf_name,
                         const MutableCFOptions& mutable_cf_options,
                         VersionStorageInfo* vstorage,
@@ -228,6 +240,11 @@ class LevelCompactionPicker : public CompactionPicker {
                                      const MutableCFOptions& mutable_cf_options,
                                      VersionStorageInfo* vstorage,
                                      LogBuffer* log_buffer) override;
+
+  virtual Compaction* PickKeyRangeCompaction(const std::string& cf_name, 
+  									const MutableCFOptions& mutable_cf_options,
+  									VersionStorageInfo& vstorage,
+  									LogBuffer* log_buffer) override;
 
   virtual bool NeedsCompaction(
       const VersionStorageInfo* vstorage) const override;

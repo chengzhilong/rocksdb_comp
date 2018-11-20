@@ -120,6 +120,9 @@ struct ImmutableCFOptions {
   const SliceTransform* memtable_insert_with_hint_prefix_extractor;
 
   std::vector<DbPath> cf_paths;
+
+  // added by ChengZhilong
+  std::unique_ptr<FixedRangeChunkBasedNVMWriteCache> fix_range_compaction_picker_;
 };
 
 struct MutableCFOptions {

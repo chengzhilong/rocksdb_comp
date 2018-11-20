@@ -2812,7 +2812,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       arg[i].thread = new ThreadState(i);
       arg[i].thread->stats.SetReporterAgent(reporter_agent.get());
       arg[i].thread->shared = &shared;
-      FLAGS_env->StartThread(ThreadBody, &arg[i]);
+      FLAGS_env->StartThread(ThreadBody, &arg[i]);			/* 线程调用接口PosixEnv::StartThread(...)，真正调用函数ThreadBody(...) */
     }
 
     shared.mu.Lock();
@@ -3671,8 +3671,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       num_key_gens = multi_dbs_.size();
     }
     std::vector<std::unique_ptr<KeyGenerator>> key_gens(num_key_gens);
-    int64_t max_ops = num_ops * num_key_gens;
-    int64_t ops_per_stage = max_ops;
+    int64_t max_ops = num_ops * num_key_gens;		/* 最大KV entry */
+    int64_t ops_per_stage = max_ops;				/* 默认设置为max_ops */
     if (FLAGS_num_column_families > 1 && FLAGS_num_hot_column_families > 0) {
       ops_per_stage = (max_ops - 1) / (FLAGS_num_column_families /
                                        FLAGS_num_hot_column_families) +
@@ -3713,7 +3713,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
 
     int64_t stage = 0;
     int64_t num_written = 0;
-    while (!duration.Done(entries_per_batch_)) {
+    while (!duration.Done(entries_per_batch_)) {			/* ops_ <= max_ops_ */
       if (duration.GetStage() != stage) {
         stage = duration.GetStage();
         if (db_.db != nullptr) {

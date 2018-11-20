@@ -48,7 +48,7 @@ bool NewestFirstBySeqNo(FileMetaData* a, FileMetaData* b) {
 namespace {
 bool BySmallestKey(FileMetaData* a, FileMetaData* b,
                    const InternalKeyComparator* cmp) {
-  int r = cmp->Compare(a->smallest, b->smallest);
+  int r = cmp->Compare(a->smallest, b->smallest);		/* a < b，则返回1 */
   if (r != 0) {
     return (r < 0);
   }
@@ -81,7 +81,7 @@ class VersionBuilder::Rep {
   };
 
   struct LevelState {
-    std::unordered_set<uint64_t> deleted_files;
+    std::unordered_set<uint64_t> deleted_files;			/* 存储的是将要deleted的sst文件的file_number */
     // Map from file number to file meta data.
     std::unordered_map<uint64_t, FileMetaData*> added_files;
   };
@@ -142,6 +142,11 @@ class VersionBuilder::Rep {
     }
   }
 
+  /*
+   * 这里的一致性理解为：vstorage存储的每层sst文件,
+   * level-0: 新添加的应该在最前面，后添加的应该在靠后面；通过比较largest_seq_no, smallest_seq_no或file_number
+   * level-1~n: 每层level内相邻sst文件，前者smallest_key或者file_number要不大于后者的，而且相邻sst文件没有key-range重叠的
+   */
   void CheckConsistency(VersionStorageInfo* vstorage) {
 #ifdef NDEBUG
     if (!vstorage->force_consistency_checks()) {
@@ -151,18 +156,20 @@ class VersionBuilder::Rep {
     }
 #endif
     // make sure the files are sorted correctly
+    // added by ChengZhilong
     for (int level = 0; level < num_levels_; level++) {
+//    for (int level = 0; level < num_levels_; level++) {
       auto& level_files = vstorage->LevelFiles(level);
       for (size_t i = 1; i < level_files.size(); i++) {
         auto f1 = level_files[i - 1];
         auto f2 = level_files[i];
         if (level == 0) {
-          if (!level_zero_cmp_(f1, f2)) {
-            fprintf(stderr, "L0 files are not sorted properly");
+          if (!level_zero_cmp_(f1, f2)) {			/* Level-0的sst文件，按照newest seq_no从前往后排序，最新的靠前 */
+            fprintf(stderr, "L0 files are not sorted properly");	/* 如果f1的newest seq_no < f2的,则说明sst文件是乱序的 */
             abort();
           }
 
-          if (f2->smallest_seqno == f2->largest_seqno) {
+          if (f2->smallest_seqno == f2->largest_seqno) {	/* 则f2对应的sst文件是通过调用API添加到db的 */
             // This is an external file that we ingested
             SequenceNumber external_file_seqno = f2->smallest_seqno;
             if (!(external_file_seqno < f1->largest_seqno ||
@@ -188,7 +195,7 @@ class VersionBuilder::Rep {
 
           // Make sure there is no overlap in levels > 0
           if (vstorage->InternalComparator()->Compare(f1->largest,
-                                                      f2->smallest) >= 0) {
+                                                      f2->smallest) >= 0) {	/* 返回>=0，则f1->largest > f2->smallest */
             fprintf(stderr, "L%d have overlapping ranges %s vs. %s\n", level,
                     (f1->largest).DebugString(true).c_str(),
                     (f2->smallest).DebugString(true).c_str());
@@ -209,6 +216,7 @@ class VersionBuilder::Rep {
     }
 #endif
     // a file to be deleted better exist in the previous version
+    /* 首先，该file很可能会在前一个version中存在，也就是base_vstorage_->files_[]中可能会有 */
     bool found = false;
     for (int l = 0; !found && l < num_levels_; l++) {
       const std::vector<FileMetaData*>& base_files =
@@ -224,6 +232,7 @@ class VersionBuilder::Rep {
     // if the file did not exist in the previous version, then it
     // is possibly moved from lower level to higher level in current
     // version
+    /* 或者该file可能在compact之后直接被迁移到更高level(因此file_number不变) */
     for (int l = level + 1; !found && l < num_levels_; l++) {
       auto& level_added = levels_[l].added_files;
       auto got = level_added.find(number);
@@ -234,6 +243,7 @@ class VersionBuilder::Rep {
     }
 
     // maybe this file was added in a previous edit that was Applied
+    /* 或者该file可能在之前的VersionEdit中被apply */
     if (!found) {
       auto& level_added = levels_[level].added_files;
       auto got = level_added.find(number);
@@ -266,19 +276,19 @@ class VersionBuilder::Rep {
 
     // Delete files
     const VersionEdit::DeletedFileSet& del = edit->GetDeletedFiles();
-    for (const auto& del_file : del) {
+    for (const auto& del_file : del) {							/* 对于每个待deleted的sst文件，获取其所在level、以及file_number */
       const auto level = del_file.first;
       const auto number = del_file.second;
-      if (level < num_levels_) {
+      if (level < num_levels_) {								/* 主要是将要被deleted的file添加到levels_[].deleted_files集合内 */
         levels_[level].deleted_files.insert(number);
-        CheckConsistencyForDeletes(edit, number, level);
+        CheckConsistencyForDeletes(edit, number, level);		/* 检查该file是否真实存在(删除之前必须保证其存在) */
 
-        auto exising = levels_[level].added_files.find(number);
+        auto exising = levels_[level].added_files.find(number);	/* 若该file是之前待added的，则直接从added_files集合中删除该file(后者优先级更高) */
         if (exising != levels_[level].added_files.end()) {
           UnrefFile(exising->second);
           levels_[level].added_files.erase(exising);
         }
-      } else {
+      } else {													/* 若所属level超出num_levels_，则为invalid，记录在invalid_levels[]集合中 */
         auto exising = invalid_levels_[level].find(number);
         if (exising != invalid_levels_[level].end()) {
           invalid_levels_[level].erase(exising);
@@ -290,7 +300,7 @@ class VersionBuilder::Rep {
     }
 
     // Add new files
-    for (const auto& new_file : edit->GetNewFiles()) {
+    for (const auto& new_file : edit->GetNewFiles()) {			/* 对新添加file的操作过程同上 */
       const int level = new_file.first;
       if (level < num_levels_) {
         FileMetaData* f = new FileMetaData(new_file.second);
@@ -298,7 +308,7 @@ class VersionBuilder::Rep {
 
         assert(levels_[level].added_files.find(f->fd.GetNumber()) ==
                levels_[level].added_files.end());
-        levels_[level].deleted_files.erase(f->fd.GetNumber());
+        levels_[level].deleted_files.erase(f->fd.GetNumber());	/* "后来者优先级更高"，原先若记录着要被deleted，则从deleted_files中移除掉 */
         levels_[level].added_files[f->fd.GetNumber()] = f;
       } else {
         uint64_t number = new_file.second.fd.GetNumber();
@@ -317,8 +327,11 @@ class VersionBuilder::Rep {
     CheckConsistency(base_vstorage_);
     CheckConsistency(vstorage);
 
-    for (int level = 0; level < num_levels_; level++) {
-      const auto& cmp = (level == 0) ? level_zero_cmp_ : level_nonzero_cmp_;
+    // added by ChengZhilong
+    // for (int level = 0; ...) -> for (int level = 1; ...)
+    for (int level = 1; level < num_levels_; level++) {								/* 对每层都会进行排序 */
+//    for (int level = 0; level < num_levels_; level++) {
+      const auto& cmp = (level == 0) ? level_zero_cmp_ : level_nonzero_cmp_;		/* 获取比较器，便于排序每层level的sst正确位置 */
       // Merge the set of added files with the set of pre-existing files.
       // Drop any deleted files.  Store the result in *v.
       const auto& base_files = base_vstorage_->LevelFiles(level);
@@ -326,20 +339,23 @@ class VersionBuilder::Rep {
       auto base_end = base_files.end();
       const auto& unordered_added_files = levels_[level].added_files;
       vstorage->Reserve(level,
-                        base_files.size() + unordered_added_files.size());
+                        base_files.size() + unordered_added_files.size());			/* 调整files_容器的大小 */
 
       // Sort added files for the level.
       std::vector<FileMetaData*> added_files;
       added_files.reserve(unordered_added_files.size());
       for (const auto& pair : unordered_added_files) {
-        added_files.push_back(pair.second);
+        added_files.push_back(pair.second);											/* 将所有unordered_added_files添加到added_files里 */
       }
-      std::sort(added_files.begin(), added_files.end(), cmp);
+      std::sort(added_files.begin(), added_files.end(), cmp);						/* 调用sort排序，基于比较器cmp */
 
 #ifndef NDEBUG
       FileMetaData* prev_file = nullptr;
 #endif
 
+	  /* 这里将所有base_iter ~ base_end和added_files[]内的所有sst
+	   * 元数据信息都按序添加到vstorage里
+       */
       for (const auto& added : added_files) {
 #ifndef NDEBUG
         if (level > 0 && prev_file != nullptr) {
@@ -350,9 +366,9 @@ class VersionBuilder::Rep {
 #endif
 
         // Add all smaller files listed in base_
-        for (auto bpos = std::upper_bound(base_iter, base_end, added, cmp);
+        for (auto bpos = std::upper_bound(base_iter, base_end, added, cmp);			/* 返回大于added对应值的第一个元素位置上的迭代器 */
              base_iter != bpos; ++base_iter) {
-          MaybeAddFile(vstorage, level, *base_iter);
+          MaybeAddFile(vstorage, level, *base_iter);								/* 将*base_iter对应的fmd追加到vstorage指定的level上 */
         }
 
         MaybeAddFile(vstorage, level, added);
@@ -364,7 +380,7 @@ class VersionBuilder::Rep {
       }
     }
 
-    CheckConsistency(vstorage);
+    CheckConsistency(vstorage);		/* 末尾做CheckConsistency */
   }
 
   void LoadTableHandlers(InternalStats* internal_stats, int max_threads,
@@ -416,11 +432,11 @@ class VersionBuilder::Rep {
   }
 
   void MaybeAddFile(VersionStorageInfo* vstorage, int level, FileMetaData* f) {
-    if (levels_[level].deleted_files.count(f->fd.GetNumber()) > 0) {
+    if (levels_[level].deleted_files.count(f->fd.GetNumber()) > 0) {			/* 若f标记的sst文件是准备要被删除掉的 */
       // f is to-be-deleted table file
       vstorage->RemoveCurrentStats(f);
     } else {
-      vstorage->AddFile(level, f, info_log_);
+      vstorage->AddFile(level, f, info_log_);									/* 否则，将f追加到vstorage内的level层内 */
     }
   }
 };

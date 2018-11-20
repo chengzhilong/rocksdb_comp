@@ -176,7 +176,7 @@ struct FdWithKeyRange {
 // Actual data is guaranteed to be stored closely
 struct LevelFilesBrief {
   size_t num_files;
-  FdWithKeyRange* files;
+  FdWithKeyRange* files;			/* 存储fd, FileMetaData, smallest_key, largest_key */
   LevelFilesBrief() {
     num_files = 0;
     files = nullptr;

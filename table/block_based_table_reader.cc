@@ -2626,12 +2626,13 @@ Status BlockBasedTable::CreateIndexReader(
   }
 }
 
+/* 获取该sst文件内排序靠在key前面的size大小 */
 uint64_t BlockBasedTable::ApproximateOffsetOf(const Slice& key) {
   unique_ptr<InternalIterator> index_iter(NewIndexIterator(ReadOptions()));
 
-  index_iter->Seek(key);
+  index_iter->Seek(key);		/* 首先查找该key是否在sst中存在 */
   uint64_t result;
-  if (index_iter->Valid()) {
+  if (index_iter->Valid()) {	/* 若存在，则解析，结果ok则获取其BlockHandle.offset，否则就取该metaindex block的偏移 */
     BlockHandle handle;
     Slice input = index_iter->value();
     Status s = handle.DecodeFrom(&input);
@@ -2643,7 +2644,7 @@ uint64_t BlockBasedTable::ApproximateOffsetOf(const Slice& key) {
       // close to the whole file size for this case.
       result = rep_->footer.metaindex_handle().offset();
     }
-  } else {
+  } else {						/* 若不存在 */
     // key is past the last key in the file. If table_properties is not
     // available, approximate the offset by returning the offset of the
     // metaindex block (which is right near the end of the file).

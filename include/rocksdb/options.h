@@ -24,6 +24,7 @@
 #include "rocksdb/universal_compaction.h"
 #include "rocksdb/version.h"
 #include "rocksdb/write_buffer_manager.h"
+#include "utilities/nvm_write_cache/nvm_cache_options.h"
 
 #ifdef max
 #undef max
@@ -942,6 +943,10 @@ struct DBOptions {
   // relies on manual invocation of FlushWAL to write the WAL buffer to its
   // file.
   bool manual_wal_flush = false;
+
+  // added by ChengZhilong
+  // used to initialize ImmutableOptions&
+  shared_ptr<NVMWriteCacheOptions> nvm_cache_options;		// need initialized when rocksdb starts.
 };
 
 // Options to control the behavior of a database (passed to DB::Open)
