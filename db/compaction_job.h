@@ -170,7 +170,10 @@ class CompactionJob {
 
   EventLogger* event_logger_;
 
-  bool bottommost_level_;					/* 当前compaction是否是处于最底层 */
+  /* 当前compaction是否是处于最底层，或者说正在compaction的所有key在output_level+1以及
+   * 更底层不可能会出现（也就是没有sst文件与它们的key范围重叠）
+   */
+  bool bottommost_level_;
   bool paranoid_file_checks_;
   bool measure_io_stats_;
   // Stores the Slices that designate the boundaries for each subcompaction

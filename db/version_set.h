@@ -445,6 +445,18 @@ class VersionStorageInfo {
   	*smallest_key = compaction_item_.start_key_.user_key();
 	*largest_key = compaction_item_.end_key_.user_key();
   }
+
+  uint64_t get_range_size() { return compaction_item_.range_size_; }
+
+  FixedRange* get_fix_range_tab() { return compaction_item_.pending_compated_range_; }
+
+  void set_compaction_item(CompactionItem* compaction_item) {
+  	compaction_item_.pending_compated_range_ = compaction_item->pending_compated_range_;
+	compaction_item_.start_key_ = compaction_item->start_key_;
+	compaction_item_.end_key_ = compaction_item->end_key_;
+	compaction_item_.chunk_num_ = compaction_item->chunk_num_;
+	compaction_item_.range_size_ = compaction_item->range_size_;
+  }
   
 
  private:

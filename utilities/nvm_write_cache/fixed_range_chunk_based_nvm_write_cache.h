@@ -52,7 +52,8 @@ namespace rocksdb{
         bool NeedCompaction() override {return !range_queue_.empty();}
 
         //get iterator of data that will be drained
-        CompactionItem* GetCompactionData();
+        GetCompactionData(CompactionItem* compaction_item);
+        //CompactionItem* GetCompactionData();
 
         // add a range with a new prefix to range mem
         // return the id of the range

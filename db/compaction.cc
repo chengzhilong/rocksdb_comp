@@ -73,6 +73,9 @@ void Compaction::GetBoundaryKeys(
     if (inputs[i].files.empty()) {
       continue;
     }
+	assert(input[i].level > 0);
+	/* added by ChengZhilong */
+	/*
     if (inputs[i].level == 0) {
       // we need to consider all files on level 0
       for (const auto* f : inputs[i].files) {
@@ -88,7 +91,8 @@ void Compaction::GetBoundaryKeys(
         }
         initialized = true;
       }
-    } else {
+    } else */
+    {
       // we only need to consider the first and last file
       const Slice& start_user_key = inputs[i].files[0]->smallest.user_key();
       if (!initialized ||
@@ -120,6 +124,10 @@ bool Compaction::IsBottommostLevel(
     }
     assert(static_cast<size_t>(output_l0_idx) < vstorage->LevelFiles(0).size());
   } else {
+  	// added by ChengZhilong
+  	if (output_level == 1) {
+		return false;	// 此返回值不重要，会在Compaction类的构造函数里重新被赋值
+  	}
     output_l0_idx = -1;
   }
   Slice smallest_key, largest_key;
@@ -136,6 +144,7 @@ bool Compaction::TEST_IsBottommostLevel(
   return IsBottommostLevel(output_level, vstorage, inputs);
 }
 
+/* 只会在Compaction::Compaction()构造函数里被调用 */
 bool Compaction::IsFullCompaction(
     VersionStorageInfo* vstorage,
     const std::vector<CompactionInputFiles>& inputs) {
@@ -147,7 +156,9 @@ bool Compaction::IsFullCompaction(
   for (size_t i = 0; i < inputs.size(); i++) {
     num_files_in_compaction += inputs[i].size();
   }
-  return num_files_in_compaction == total_num_files;
+  // added by ChengZhilong
+  //return num_files_in_compaction == total_num_files;
+  return false;
 }
 
 Compaction::Compaction(VersionStorageInfo* vstorage,
@@ -185,6 +196,7 @@ Compaction::Compaction(VersionStorageInfo* vstorage,
       is_full_compaction_(IsFullCompaction(vstorage, inputs_)),
       is_manual_compaction_(_manual_compaction),
       is_trivial_move_(false),
+      fix_range_table_picker_(nullptr),
       compaction_reason_(_compaction_reason) {
   MarkFilesBeingCompacted(true);					/* 构造Compaction时，将inputs_[]所有sst文件都标记为正在compacting的状态 */
   if (is_manual_compaction_) {
@@ -208,10 +220,14 @@ Compaction::Compaction(VersionStorageInfo* vstorage,
                                 &arena_);	/* 记录inputs_[]每个sst文件的smallest_key, largest_key, fd和fmd等信息到input_levels_[] */
     }
   }
+  // added by ChengZhilong
   if (start_level_ == 0) {
   	// 需要给smallest_user_key_和largest_user_key_赋初值
   	vstorage->get_slice_key_range_boudary(&smallest_user_key_, &largest_user_key_);
 	GetLevel01BoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_);
+  	bottommost_level_ = (!vstorage->RangeMightExistAfterSortedRun(smallest_user_key_, largest_user_key_, output_level_, -1));
+
+	fix_range_table_picker_ = vstorage->get_fix_range_tab();
   } else {
   	/* 获取inputs_保存的所有sst文件中记录的最小key和最大key，分别存放在smallest_user_key_和largest_user_key_ */
   	GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_);
@@ -452,6 +468,11 @@ uint64_t Compaction::OutputFilePreallocationSize() const {
     for (const auto& file : level_files.files) {
       preallocation_size += file->fd.GetFileSize();
     }
+  }
+
+  // added by ChengZhilong
+  if (start_level_ == 0 && output_level_ == 1) {
+	preallocation_size += input_vstorage_->get_range_size();
   }
 
   if (max_output_file_size_ != port::kMaxUint64 &&

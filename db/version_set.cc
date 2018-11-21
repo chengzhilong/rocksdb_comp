@@ -2066,7 +2066,7 @@ void VersionStorageInfo::GetOverlappingInputs(
     *file_index = -1;
   }
   const Comparator* user_cmp = user_comparator_;
-  if (level > 0) {			/* 若output_level == 1，直接调用这个函数就可以了 */
+  if (level > 0) {			/* 若output_level > 0，直接调用这个函数就可以了 */
     GetOverlappingInputsRangeBinarySearch(level, begin, end, inputs,
                                           hint_index, file_index);
     return;

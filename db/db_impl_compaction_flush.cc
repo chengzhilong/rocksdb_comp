@@ -1766,7 +1766,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
 if (!c) {
     // Nothing to do
     ROCKS_LOG_BUFFER(log_buffer, "Compaction nothing to do");
-  } else if (c->deletion_compaction()) {							/* compaction过程只是也只有删除所有input files, 只有FIFOCompaction支持 */
+  } else if (c->deletion_compaction()) {							/* compaction过程只删除所有input files, 只有FIFOCompaction支持 */
     // TODO(icanadi) Do we want to honor snapshots here? i.e. not delete old
     // file if there is alive snapshot pointing to it
     assert(c->num_input_files(1) == 0);
@@ -1887,7 +1887,7 @@ if (!c) {
     assert(is_snapshot_supported_ || snapshots_.empty());
 
 	CompactionJob compaction_job(
-		job_context->job_id, c.get), immutable_db_options_,
+		job_context->job_id, c.get(), immutable_db_options_,
 		env_options_for_compaction_, versions_.get(), &shutting_down_,
 		preserve_deletes_seqnum_.load(), log_buffer, directories_.GetDbDir(),
 		GetDataDir(c->column_family_data(), c->output_path_id()), stats_,
@@ -1899,7 +1899,6 @@ if (!c) {
 
 	compaction_job.PrepareKeyRange();
 	mutex_.Unlock();
-//	compaction_job.RunKeyRange();
 	compaction_job.Run();
 	TEST_SYNC_POINT("DBImpl::BackgroundCompaction:KeyRangeCompaction: AfterRun");
 	mutex_.Lock();
@@ -1908,7 +1907,7 @@ if (!c) {
 	if (status.ok()) {
 	  InstallSuperVersionAndScheduleWork(c->column_family_data(),
 	  	&job_context->superversion_context, *c->mutable_cf_options(),
-	  	FlushReason::kAutoCompaction);
+	  	FlushReason::kAutoCompaction);S
 	}
 	*made_progress = true;
   	

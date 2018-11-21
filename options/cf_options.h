@@ -122,6 +122,7 @@ struct ImmutableCFOptions {
   std::vector<DbPath> cf_paths;
 
   // added by ChengZhilong
+  // 用shared_ptr还是unique_ptr好?
   std::unique_ptr<FixedRangeChunkBasedNVMWriteCache> fix_range_compaction_picker_;
 };
 

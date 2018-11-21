@@ -276,6 +276,12 @@ class Compaction {
   static bool IsFullCompaction(VersionStorageInfo* vstorage,
                                const std::vector<CompactionInputFiles>& inputs);
 
+  void ReleaseKeyRangeTab() {
+  	if (fix_range_table_picker_ != nullptr) {
+		fix_range_table_picker_->Release();
+  	}
+  }
+
   // added by ChengZhilong
   uint64_t getChunkNum()
   {
@@ -289,7 +295,7 @@ class Compaction {
 
   const int start_level_;    // the lowest level to be compacted
   const int output_level_;  // levels to which output files are stored
-  uint64_t max_output_file_size_;
+  uint64_t max_output_file_size_;		/* 设定output_level_层的file_size最大值 */
   uint64_t max_compaction_bytes_;
   uint32_t max_subcompactions_;
   const ImmutableCFOptions immutable_cf_options_;
@@ -358,6 +364,10 @@ class Compaction {
   // Initialized in VersionSet when compact_level_ == 0, 
   struct CompactionItem compact_item_;		// record chunk-set info
   const int chunk_num_;
+
+  // similar to TableCache
+  // 在key_range准备compaction时初始化该值，否则一直为nullptr???
+  FixedRangeTab* fix_range_table_picker_;
 };
 
 // Utility function

@@ -388,8 +388,6 @@ class ColumnFamilyData {
   // added by ChengZhilong
   Compaction* KeyRangePickCompaction();
 
-  FixedRangeTable* fixed_range_table() const { return fix_range_table_picker_; }
-
  private:
   friend class ColumnFamilySet;
   ColumnFamilyData(uint32_t id, const std::string& name,
@@ -481,11 +479,8 @@ class ColumnFamilyData {
   // For KeyRangeBased compaction (you can take it as level-0)
   // Need initialized in constructure function
   // in struct ImmutableCFOptions
-  std::unique_ptr<FixedRangeChunkBasedNVMWriteCache> fix_range_compaction_picker_;
-
-  // similar to TableCache
-  std::unique_ptr<FixedRangeTab> fix_range_table_picker_;
-  
+  // 在ColumnFamilyData类和vstorage类之间共享该指针???
+  std::unique_ptr<FixedRangeChunkBasedNVMWriteCache> fix_range_compaction_picker_;  
 };
 
 // ColumnFamilySet has interesting thread-safety requirements

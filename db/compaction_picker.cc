@@ -257,6 +257,9 @@ bool CompactionPicker::ExpandInputsToCleanCut(const std::string& /*cf_name*/,
   return true;
 }
 
+/* 比较参数[smallest_user_key, largest_user_key]和所有正在进行
+ * compaction的且属于同一level的key_range是否有重叠 
+ */
 bool CompactionPicker::RangeOverlapWithCompaction(
     const Slice& smallest_user_key, const Slice& largest_user_key,
     int level) const {
@@ -288,7 +291,7 @@ bool CompactionPicker::FilesRangeOverlapWithCompaction(
   }
 
   InternalKey smallest, largest;
-  GetRange(inputs, &smallest, &largest);
+  GetRange(inputs, &smallest, &largest);	/* 获取inputs记录的最小key和最大key：[smallest, largest] */
   return RangeOverlapWithCompaction(smallest.user_key(), largest.user_key(),
                                     level);
 }
@@ -544,12 +547,36 @@ bool CompactionPicker::SetupOtherInputs(
   return true;
 }
 
+// added by ChengZhilong
+void CompactionPicker::GetKeyRangeGrandparents(
+	VersionStorageInfo* vstorage, InternalKey* smallest, InternalKey* largest,
+	const CompactionInputFiles& output_level_inputs,
+	std::vector<FileMetaData*>* grandparents) {
+  InternalKey start, limit;
+  if (!output_level_inputs.empty()) {
+	InternalKey smallest1, largest1;
+	
+	start = smallest; limit = largest;
+	GetRange(output_level_inputs, &smallest1, &largest1);
+
+	start =
+        icmp_->Compare(smallest1, *smallest) < 0 ? smallest1 : (*smallest);
+    limit = icmp_->Compare(largest1, *largest) < 0 ? (*largest) : largest1;
+  } else {
+	start = *smallest;
+	limit = *largest;
+  }
+
+  if (output_level_inputs.level + 1 < NumberLevels()) {
+	vstorage->GetOverlappingInputs(output_level_inputs.level + 1, &start, &limit, grandparents);
+  }
+}
 void CompactionPicker::GetGrandparents(
     VersionStorageInfo* vstorage, const CompactionInputFiles& inputs,
     const CompactionInputFiles& output_level_inputs,
     std::vector<FileMetaData*>* grandparents) {
   InternalKey start, limit;
-  GetRange(inputs, output_level_inputs, &start, &limit);
+  GetRange(inputs, output_level_inputs, &start, &limit);		/* 获取inputs, output_level_inputs的smallest_key, largest_key */
   // Compute the set of grandparent files that overlap this compaction
   // (parent == level+1; grandparent == level+2)
   if (output_level_inputs.level + 1 < NumberLevels()) {
@@ -1418,6 +1445,15 @@ Compaction* LevelCompactionBuilder::PickKeyRangeCompaction() {
   	compaction_inputs_.push_back(output_level_inputs_);
   }
 
+  // Level-1的sst文件不能正在进行compaction
+  if (compaction_picker_->FilesRangeOverlapWithCompaction(compaction_inputs_, output_level_)) {
+	return nullptr;
+  }
+
+  // Get grandparents
+  compaction_picker_->GetKeyRangeGrandparents(vstorage_, &smallest, &largest,
+                                        output_level_inputs_, &grandparents_);
+
   Compaction* c = GetKeyRangeCompaction();
 
   TEST_SYNC_POINT_CALLBACK("LevelCompactionPicker::PickCompaction:Return", c);
@@ -1433,6 +1469,7 @@ Compaction* LevelCompactionBuilder::GetKeyRangeCompaction()
 	compaction_reason_ = CompactionReason::kLevelL0FilesNum;
 	start_level_score_ = 1.0;		// Key-Range, just for log
 
+	/* 另外有CompactionPicker::CompactFiles,CompactRange函数也new Compaction(...) */
 	auto c = new Compaction(
 		vstorage_, ioptions_, mutable_cf_options_, std::move(compaction_inputs_),
       output_level_, target_file_size,

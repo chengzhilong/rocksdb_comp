@@ -229,10 +229,14 @@ struct CompactionJob::SubcompactionState {
     }
     seen_key = true;
 
+	/* 这里overlapped_bytes是记录某个正在output 文件与grandparent层的sst文件重叠的bytes数量，
+	 * 之所以overlapped_bytes + curr_file_size > ...时就会停止当前file的output，应该是采用
+	 * 一种粗略的估计方法吧，而不是严格地按照max_compaction_bytes()来
+	 */
     if (overlapped_bytes + curr_file_size >
-        compaction->max_compaction_bytes()) {
+        compaction->max_compaction_bytes()) {				/* 这里只是为了不让output_level_层的sst文件size过大 */
       // Too much overlap for current output; start new output
-      overlapped_bytes = 0;
+      overlapped_bytes = 0;									/* 清零 */
       return true;
     }
 
@@ -288,6 +292,11 @@ struct CompactionJob::CompactionState {
     }
     // If there is no finished output, return an empty slice.
     return Slice(nullptr, 0);
+  }
+
+  // added by ChengZhilong
+  void ReleaseKeyRangeTab() {
+	compaction->ReleaseKeyRangeTab();
   }
 };
 
@@ -908,12 +917,12 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
 
   Slice* start = sub_compact->start;
   Slice* end = sub_compact->end;
-  if (start != nullptr) {
+  if (start != nullptr) {								/* 若是sub-compaction，则就从预先分配好的位置开始进行compaction */
     IterKey start_iter;
     start_iter.SetInternalKey(*start, kMaxSequenceNumber, kValueTypeForSeek);
     input->Seek(start_iter.GetInternalKey());
   } else {
-    input->SeekToFirst();
+    input->SeekToFirst();								/* 否则，从头开始 */
   }
 
   Status status;
@@ -1501,7 +1510,7 @@ Status CompactionJob::OpenCompactionOutputFile(
   writable_file->SetIOPriority(Env::IO_LOW);
   writable_file->SetWriteLifeTimeHint(write_hint_);
   writable_file->SetPreallocationBlockSize(static_cast<size_t>(
-      sub_compact->compaction->OutputFilePreallocationSize()));
+      sub_compact->compaction->OutputFilePreallocationSize()));			/* 根据inputs_的总sst文件size，预分配合适的文件大小 */
   sub_compact->outfile.reset(new WritableFileWriter(
       std::move(writable_file), env_options_, db_options_.statistics.get()));
 
@@ -1540,6 +1549,9 @@ Status CompactionJob::OpenCompactionOutputFile(
 }
 
 void CompactionJob::CleanupCompaction() {
+  // added by ChengZhilong
+ compact_->ReleaseKeyRangeTab();	/* if it's Key-Range Tab compaction, then release it's resources needed! */
+
   for (SubcompactionState& sub_compact : compact_->sub_compact_states) {
     const auto& sub_status = sub_compact.status;
 

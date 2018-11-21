@@ -181,6 +181,12 @@ class CompactionPicker {
                         CompactionInputFiles* inputs,
                         CompactionInputFiles* output_level_inputs,
                         int* parent_index, int base_index);
+  // added by ChengZhilong
+  void GetKeyRangeGrandparents(VersionStorageInfo* vstorage,
+  						InternalKey* smallest,
+  						InternalKey* largest,
+						const CompactionInputFiles& output_level_inputs,
+						std::vector<FileMetaData*>* grandparents);
 
   void GetGrandparents(VersionStorageInfo* vstorage,
                        const CompactionInputFiles& inputs,

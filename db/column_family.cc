@@ -927,6 +927,14 @@ bool ColumnFamilyData::NeedsCompaction() const {
 
 Compaction* ColumnFamilyData::PickCompaction(
     const MutableCFOptions& mutable_options, LogBuffer* log_buffer) {
+  // added by ChengZhilong
+
+  // 不论是key-range层做compaction还是其它level层，都需要更新下该信息
+  // 该处需要先更新compaction_item，再获取其compaction
+  CompactionItem compaction_item;
+  fix_range_compaction_picker_->GetCompactionData(&compaction_item);
+  current_->storage_info()->set_compaction_item(&compaction_item);
+  
   auto* result = compaction_picker_->PickKeyRangeCompaction(GetName(),
   	  mutable_options, current_->storage_info(), log_buffer);
   if (result == nullptr) {

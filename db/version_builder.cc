@@ -157,7 +157,7 @@ class VersionBuilder::Rep {
 #endif
     // make sure the files are sorted correctly
     // added by ChengZhilong
-    for (int level = 0; level < num_levels_; level++) {
+    for (int level = 1; level < num_levels_; level++) {
 //    for (int level = 0; level < num_levels_; level++) {
       auto& level_files = vstorage->LevelFiles(level);
       for (size_t i = 1; i < level_files.size(); i++) {
