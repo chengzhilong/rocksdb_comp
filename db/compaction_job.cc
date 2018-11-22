@@ -295,8 +295,8 @@ struct CompactionJob::CompactionState {
   }
 
   // added by ChengZhilong
-  void ReleaseKeyRangeTab() {
-	compaction->ReleaseKeyRangeTab();
+  void CleanupKeyRangeTab() {
+	compaction->CleanUpKeyRangeTab();
   }
 };
 
@@ -1550,7 +1550,7 @@ Status CompactionJob::OpenCompactionOutputFile(
 
 void CompactionJob::CleanupCompaction() {
   // added by ChengZhilong
- compact_->ReleaseKeyRangeTab();	/* if it's Key-Range Tab compaction, then release it's resources needed! */
+ compact_->CleanupKeyRangeTab();	/* if it's Key-Range Tab compaction, then cleanup it's resources needed! */
 
   for (SubcompactionState& sub_compact : compact_->sub_compact_states) {
     const auto& sub_status = sub_compact.status;

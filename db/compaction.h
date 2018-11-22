@@ -276,9 +276,10 @@ class Compaction {
   static bool IsFullCompaction(VersionStorageInfo* vstorage,
                                const std::vector<CompactionInputFiles>& inputs);
 
-  void ReleaseKeyRangeTab() {
+  void CleanUpKeyRangeTab() {
   	if (fix_range_table_picker_ != nullptr) {
-		fix_range_table_picker_->Release();
+		fix_range_table_picker_->CleanUp();
+		vstorage_->reset_compaction_item();
   	}
   }
 

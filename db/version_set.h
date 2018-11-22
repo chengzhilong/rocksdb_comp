@@ -25,6 +25,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -456,6 +457,12 @@ class VersionStorageInfo {
 	compaction_item_.end_key_ = compaction_item->end_key_;
 	compaction_item_.chunk_num_ = compaction_item->chunk_num_;
 	compaction_item_.range_size_ = compaction_item->range_size_;
+  }
+
+  void reset_compaction_item()
+  {
+  	memset(&compaction_item_, 0, sizeof(compaction_item_));
+	compaction_item_.pending_compated_range_ = nullptr;
   }
   
 
