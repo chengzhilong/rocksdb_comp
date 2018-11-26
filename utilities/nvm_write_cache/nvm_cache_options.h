@@ -5,14 +5,13 @@
 #pragma once
 
 #include "include/rocksdb/options.h"
-#include "include/rocksdb/filter_policy.h"
 #include "utilities/nvm_write_cache/prefix_extractor.h"
 #include "utilities/nvm_write_cache/nvm_write_cache.h"
-
 namespace rocksdb{
 
     class NVMWriteCache;
     //class PrefixExtractor;
+    class FixedRangeChunkBasedNVMWriteCache;
 
     struct PMemInfo{
         std::string pmem_path_;
@@ -30,69 +29,61 @@ namespace rocksdb{
         kNoDrain,
     };
 
+struct FixedRangeBasedOptions{
+
+    const uint16_t chunk_bloom_bits_ = 16;
+    const uint16_t prefix_bits_ = 3;
+    PrefixExtractor* prefix_extractor_ = nullptr;
+    const FilterPolicy* filter_policy_ = nullptr;
+    //const uint64_t range_num_threshold_ = 0;
+    const size_t range_size_ = 1 << 27;
+
+    FixedRangeBasedOptions(
+            uint16_t chunk_bloom_bits,
+            uint16_t prefix_bits,
+            PrefixExtractor* prefix_extractor,
+            const FilterPolicy* filter_policy,
+            //uint64_t range_num_threashold,
+            uint64_t range_size)
+            :
+            chunk_bloom_bits_(chunk_bloom_bits),
+            prefix_bits_(prefix_bits),
+            prefix_extractor_(prefix_extractor),
+            filter_policy_(filter_policy),
+            //range_num_threshold_(range_num_threashold),
+            range_size_(range_size){
+
+    }
+
+};
+
+struct DynamicRangeBasedOptions{
+
+};
+
+struct TreeBasedOptions{
+
+};
+
+
     struct NVMCacheOptions{
         NVMCacheOptions();
-
         explicit NVMCacheOptions(Options& options);
-
         ~NVMCacheOptions();
 
         bool use_nvm_write_cache_;
-
         bool reset_nvm_write_cache;
-
         PMemInfo pmem_info_;
-
         NVMCacheType nvm_cache_type_;
-
         NVMWriteCache* nvm_write_cache_;
-
         DrainStrategy drain_strategy_;
 
-        static NVMWriteCache* NewNVMWriteCache(NVMCacheOptions* nvm_write_cache_options, NVMCacheType cache_type);
+        static FixedRangeChunkBasedNVMWriteCache* NewFixedRangeChunkBasedCache(NVMCacheOptions* nvm_cache_options,
+                FixedRangeBasedOptions* foptions);
 
     };
 
-    struct FixedRangeBasedOptions{
 
-        const uint16_t chunk_bloom_bits_ = 16;
-
-        const uint16_t prefix_bits_ = 3;
-
-        PrefixExtractor* prefix_extractor_ = nullptr;
-
-        const FilterPolicy* filter_policy_ = nullptr;
-
-        const uint64_t range_num_threshold_ = 0;
-
-        const uint64_t range_size_threshold_ = 64ul << 20;
-
-        FixedRangeBasedOptions(
-                uint16_t chunk_bloom_bits,
-                uint16_t prefix_bits,
-                PrefixExtractor* prefix_extractor,
-                const FilterPolicy* filter_policy,
-                uint64_t range_num_threashold,
-                uint64_t range_size_threshold)
-            :
-                chunk_bloom_bits_(chunk_bloom_bits),
-                prefix_bits_(prefix_bits),
-                prefix_extractor_(prefix_extractor),
-                filter_policy_(filter_policy),
-                range_num_threshold_(range_num_threashold),
-                range_size_threshold_(range_size_threshold){
-
-        }
-
-    };
-
-    struct DynamicRangeBasedOptions{
-
-    };
-
-    struct TreeBasedOptions{
-
-    };
 
 } //end rocksdb
 

@@ -11,12 +11,13 @@
 #include <ctime>
 #include "util/random.h"
 #include "test_common.h"
-#include "utilities/nvm_write_cache/libpmemobj++/p.hpp"
-#include "utilities/nvm_write_cache/libpmemobj++/persistent_ptr.hpp"
-#include "utilities/nvm_write_cache/libpmemobj++/transaction.hpp"
-#include "utilities/nvm_write_cache/libpmemobj++/pool.hpp"
-#include "utilities/nvm_write_cache/libpmemobj++/make_persistent.hpp"
-#include "utilities/nvm_write_cache/libpmemobj++/make_persistent_array.hpp"
+#include "libpmemobj++/p.hpp"
+#include "libpmemobj++/persistent_ptr.hpp"
+#include "libpmemobj++/transaction.hpp"
+#include "libpmemobj++/pool.hpp"
+#include "libpmemobj++/make_persistent.hpp"
+#include "libpmemobj++/make_persistent_array.hpp"
+#include "persistent_batchupdate_skiplist.h"
 
 using namespace pmem::obj;
 
@@ -69,11 +70,11 @@ namespace rocksdb {
 
     class PersistentKeyBuffer : public KeyBuffer {
     public:
-        PersistentKeyBuffer(pool_base &pop, size_t size) {
+        PersistentKeyBuffer(pool_base &pop, size_t size):pop_(pop){
             transaction::run(pop, [&] {
-                buf_ = make_persistent<char[]>(size);
+                buf_ = make_persistent<persistent_ptr<char[]>[]>(10000);
             });
-            now_ = 0;
+            cur_ = 0;
         }
 
         ~PersistentKeyBuffer() override {
@@ -81,10 +82,16 @@ namespace rocksdb {
         }
 
         uint64_t Allocate(const char *key, size_t size) override {
-            memcpy(static_cast<char*>(&buf_[0]) + now_, key, size);
+            /*memcpy(&buf_[0] + now_, key, size);
             uint64_t rtn = now_;
             now_ += size;
-            return rtn;
+            return rtn;*/
+            transaction::run(pop_, [&] {
+                buf_[cur_] = make_persistent<char[]>(size);
+                memcpy(&buf_[cur_][0], key, size);
+                cur_ = cur_ + 1;
+            });
+            return size;
         }
 
         char *Get(uint64_t off) override {
@@ -92,55 +99,10 @@ namespace rocksdb {
         }
 
     private:
-
-        persistent_ptr<char[]> buf_;
-        uint64_t now_;
+        pool_base& pop_;
+        persistent_ptr<persistent_ptr<char[]>[]> buf_;
+        p<int> cur_;
     };
-
-    class VolatileKeyBuffer : public KeyBuffer {
-    public:
-        VolatileKeyBuffer(size_t size) {
-            buf_ = new char[size];
-            now_ = buf_;
-            remain_ = size;
-            capacity_ = size;
-            cur_ = 0;
-        }
-
-        ~VolatileKeyBuffer() override {
-            delete buf_;
-        }
-
-        uint64_t Allocate(const char *key, size_t size) override {
-            memcpy(now_, key, size);
-            now_ += size;
-
-            uint64_t rtn = cur_;
-            cur_ += size;
-            remain_ -= size;
-            return rtn;
-        }
-
-        char *Get(uint64_t off) override {
-            return buf_ + off;
-        }
-
-        char* Reset(uint64_t& size) {
-            size = cur_;
-            now_ = buf_;
-            remain_ = capacity_;
-            cur_ = 0;
-        }
-
-    private:
-        char *buf_;
-        char *now_;
-        size_t capacity_;
-        size_t remain_;
-        uint64_t cur_;
-    };
-
-
 
 
     struct Node {
@@ -159,17 +121,17 @@ namespace rocksdb {
             next_[n] = next;
         };
 
-        bool persisted_;
-        uint64_t off_;
-        std::string vkey_;
-        Node *next_[kMaxHeight];
+        bool persisted;
+        char*  vkey_;
+        size_t  key_size;
+        Node *next_[1];
     };
 
     class persistent_SkipList {
     public:
         explicit persistent_SkipList(pool_base &pop, int32_t max_height = 12, int32_t branching_factor = 4);
 
-        ~persistent_SkipList() {}
+        ~persistent_SkipList() = default;
 
         void Insert(pool_base &pop, const char *key);
 
@@ -187,7 +149,6 @@ namespace rocksdb {
 
         uint16_t max_height_;
 
-        VolatileKeyBuffer* vbuffer_;
         PersistentKeyBuffer* pbuffer_;
         uint64_t count_;
 
@@ -214,6 +175,7 @@ namespace rocksdb {
 
         Node *FindLessThan(const std::string &key, Node **prev = nullptr) const;
 
+        void DoPersist();
         //persistent_ptr<Node> FindLast() const;
 
 
@@ -226,7 +188,6 @@ namespace rocksdb {
             kBranching_(static_cast<uint16_t>(branching_factor)),
             kScaledInverseBranching_((Random::kMaxNext + 1) / kBranching_),
             max_height_(1),
-            vbuffer_(new VolatileKeyBuffer(4 * 1024 * 1024)),
             pbuffer_(new PersistentKeyBuffer(pop, 1ul * 1024 * 1024 * 1024)),
             count_(0){
         head_ = NewNode(pop, " ", max_height);
@@ -243,20 +204,31 @@ namespace rocksdb {
 
     Node *persistent_SkipList::NewNode(pool_base &pop, const std::string &key, int height) {
         Node *n;
-        n = new Node;
-        n->vkey_ = key;
-        n->off_ = vbuffer_->Allocate(key.c_str(), key.size());
-        count_++;
-        if(count_ > 100){
-            printf("count = %d start persistent\n", count_);
-            uint64_t psize = 0;
-            char* src = vbuffer_->Reset(psize);
-            printf("before allocate\n");
-            pbuffer_->Allocate(src, psize);
-            printf("end persistent\n");
+        n = static_cast<Node*>(malloc(sizeof(Node) + height * sizeof(Node*)));
+        n->vkey_ = new char[key.size()];
+        memcpy(n->vkey_, key.c_str(), key.size());
+        n->key_size = key.size();
+        n->persisted = false;
+        count_+= n->key_size;
+        if(count_ > 4096){
+            DoPersist();
             count_ = 0;
         }
         return n;
+    }
+
+    void persistent_SkipList::DoPersist() {
+        Node *start = head_->Next(0);
+        std::string tmp;
+        while (start != nullptr) {
+            if(!start->persisted){
+                tmp.append(start->vkey_, start->key_size);
+                start->persisted = true;
+            }
+            start = start->Next(0);
+        }
+        pbuffer_->Allocate(tmp.c_str(), tmp.size());
+
     }
 
     int persistent_SkipList::RandomHeight() {
@@ -271,8 +243,8 @@ namespace rocksdb {
     // when n < key returns true
     // n should be at behind of key means key is after node
     bool persistent_SkipList::KeyIsAfterNode(const std::string &key, Node *n) const {
-        printf("n is %s\n", n == nullptr ? "null" : "not null");
-        return (n != nullptr) && (n->vkey_.compare(key));
+        //printf("n is %s\n", n == nullptr ? "null" : "not null");
+        return (n != nullptr) && (strcmp(n->vkey_, key.c_str()) < 0);
     }
 
     Node *persistent_SkipList::FindLessThan(const std::string &key,
@@ -315,15 +287,13 @@ namespace rocksdb {
             max_height_ = static_cast<uint16_t >(height);
         }
 
-        transaction::run(pop, [&] {
-            Node *x = NewNode(pop, key, height);
-            for (int i = 0; i < height; i++) {
-                x->SetNext(i, prev_[i]->Next(i));
-                prev_[i]->SetNext(i, x);
-            }
-            prev_[0] = x;
-            prev_height_ = static_cast<uint16_t >(height);
-        });
+        Node *x = NewNode(pop, key, height);
+        for (int i = 0; i < height; i++) {
+            x->SetNext(i, prev_[i]->Next(i));
+            prev_[i]->SetNext(i, x);
+        }
+        prev_[0] = x;
+        prev_height_ = static_cast<uint16_t >(height);
 
     }
 
@@ -334,7 +304,7 @@ namespace rocksdb {
         Node *last_bigger;
         while (true) {
             Node *next = x->Next(level);
-            int cmp = (next == nullptr || next == last_bigger) ? 1 : next->vkey_.compare(key);
+            int cmp = (next == nullptr || next == last_bigger) ? 1 : strcmp(next->vkey_, key.c_str());
             if (cmp == 0 || (cmp > 0 && level == 0)) {
                 return next;
             } else if (cmp < 0) {
@@ -348,10 +318,8 @@ namespace rocksdb {
     }
 
     void persistent_SkipList::Print() const {
-        int i = 0;
         Node *start = head_->Next(0);
         while (start != nullptr) {
-            printf("get:%d %s\n", i++, start->vkey_.data());
             start = start->Next(0);
         }
 
@@ -430,10 +398,10 @@ int main(int argc, char *argv[]) {
     }
     endt = clock();
     printf("insert cost  = %f\n", (double) (endt - startt) / CLOCKS_PER_SEC);
-    startt = clock();
+    /*startt = clock();
     skiplist->Print();
     endt = clock();
-    printf("print cost  = %f\n", (double) (endt - startt) / CLOCKS_PER_SEC);
+    printf("print cost  = %f\n", (double) (endt - startt) / CLOCKS_PER_SEC);*/
 
     pop.close();
 

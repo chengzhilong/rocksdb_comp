@@ -1913,6 +1913,9 @@ struct ThreadState {
   }
 };
 
+/* 持续：the length of time that sth lasts or continues 
+ * max_seconds, max_ops
+ */
 class Duration {
  public:
   Duration(uint64_t max_seconds, int64_t max_ops, int64_t ops_per_stage = 0) {
@@ -1931,7 +1934,7 @@ class Duration {
 
     if (max_seconds_) {
       // Recheck every appx 1000 ops (exact iff increment is factor of 1000)
-      auto granularity = FLAGS_ops_between_duration_checks;
+      auto granularity = FLAGS_ops_between_duration_checks;		/* 粒度 */
       if ((ops_ / granularity) != ((ops_ - increment) / granularity)) {
         uint64_t now = FLAGS_env->NowMicros();
         return ((now - start_at_) / 1000000) >= max_seconds_;
@@ -2325,6 +2328,7 @@ class Benchmark {
     }
   }
 
+  // 将const char[] 封装成Slice结构
   Slice AllocateKey(std::unique_ptr<const char[]>* key_guard) {
     char* data = new char[key_size_];
     const char* const_data = data;
@@ -2663,7 +2667,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
         exit(1);
       }
 
-      if (fresh_db) {
+      if (fresh_db) {			/* 需要删除已有的db */
         if (FLAGS_use_existing_db) {
           fprintf(stdout, "%-12s : skipped (--use_existing_db is true)\n",
                   name.c_str());
@@ -2740,12 +2744,12 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     ThreadState* thread = arg->thread;
     {
       MutexLock l(&shared->mu);
-      shared->num_initialized++;
-      if (shared->num_initialized >= shared->total) {
+      shared->num_initialized++;			/* SharedState初始化完毕，计数+1 */
+      if (shared->num_initialized >= shared->total) {	/* 唤醒所有正在睡眠的线程 */
         shared->cv.SignalAll();
       }
       while (!shared->start) {
-        shared->cv.Wait();
+        shared->cv.Wait();					/* 睡眠等待 */
       }
     }
 
@@ -3682,7 +3686,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     Duration duration(test_duration, max_ops, ops_per_stage);
     for (size_t i = 0; i < num_key_gens; i++) {
       key_gens[i].reset(new KeyGenerator(&(thread->rand), write_mode, num_,
-                                         ops_per_stage));
+                                         ops_per_stage));		/* 确定key_gens的mode是seq还是random */
     }
 
     if (num_ != FLAGS_num) {
@@ -3740,8 +3744,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       }
 
       for (int64_t j = 0; j < entries_per_batch_; j++) {
-        int64_t rand_num = key_gens[id]->Next();
-        GenerateKeyFromInt(rand_num, FLAGS_num, &key);
+        int64_t rand_num = key_gens[id]->Next();			/* 每次都根据mode生成下一个随机数 */
+        GenerateKeyFromInt(rand_num, FLAGS_num, &key);		/* 将其封装为Slice */
         if (use_blob_db_) {
 #ifndef ROCKSDB_LITE
           Slice val = gen.Generate(value_size_);
@@ -3751,7 +3755,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
           s = blobdb->PutWithTTL(write_options_, key, val, ttl);
 #endif  //  ROCKSDB_LITE
         } else if (FLAGS_num_column_families <= 1) {
-          batch.Put(key, gen.Generate(value_size_));
+          batch.Put(key, gen.Generate(value_size_));		/* 调用WriteBatch类的Put接口 */
         } else {
           // We use same rand_num as seed for key and column family so that we
           // can deterministically find the cfh corresponding to a particular

@@ -26,7 +26,7 @@
 #include "rocksdb/options.h"
 #include "util/thread_local.h"
 
-#include "utilities/nvm_write_cache/hzx/fixed_range_tab.h"
+#include "utilities/nvm_write_cache/fixed_range_tab.h"
 
 namespace rocksdb {
 

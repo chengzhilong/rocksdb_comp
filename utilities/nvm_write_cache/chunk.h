@@ -38,16 +38,17 @@ namespace rocksdb{
 
     class BuildingChunk{
     public:
-        explicit BuildingChunk(const FilterPolicy* filter_policy);
+        explicit BuildingChunk(const FilterPolicy* filter_policy, const std::string& prefix);
         ~BuildingChunk();
 
         void Insert(const Slice& key, const Slice& value);
 
-        std::string* Finish();
+        std::string* Finish(char** bloom_data, Slice& cur_start, Slice& cur_end);
 
         uint64_t NumEntries();
 
     private:
+        std::string prefix_;
         uint64_t num_entries_;
         ArrayBasedChunk* chunk_;
         std::vector<Slice> keys_;

@@ -36,7 +36,7 @@
 #include "util/compression.h"
 #include "util/sst_file_manager_impl.h"
 
-#include "utilities/nvm_write_cache/hzx/fixed_range_tab.h"
+#include "utilities/nvm_write_cache/fixed_range_tab.h"
 
 namespace rocksdb {
 
