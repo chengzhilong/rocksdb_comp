@@ -386,7 +386,7 @@ class ColumnFamilyData {
   Directory* GetDataDir(size_t path_id) const;
 
   // added by ChengZhilong
-  Compaction* KeyRangePickCompaction();
+//  Compaction* KeyRangePickCompaction();
 
  private:
   friend class ColumnFamilySet;

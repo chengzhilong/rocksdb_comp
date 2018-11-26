@@ -228,6 +228,8 @@ Compaction::Compaction(VersionStorageInfo* vstorage,
   	bottommost_level_ = (!vstorage->RangeMightExistAfterSortedRun(smallest_user_key_, largest_user_key_, output_level_, -1));
 
 	fix_range_table_picker_ = vstorage->get_fix_range_tab();
+
+	fix_range_table_picker_->SetCompactionWorking(true);		/* 将该range tab标记为正在进行compaction的状态 */
   } else {
   	/* 获取inputs_保存的所有sst文件中记录的最小key和最大key，分别存放在smallest_user_key_和largest_user_key_ */
   	GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_);
@@ -408,6 +410,8 @@ uint64_t Compaction::CalculateTotalInputSize() const {
 
 void Compaction::ReleaseCompactionFiles(Status status) {
   MarkFilesBeingCompacted(false);									/* 将Compaction类内的inputs_[]所有sst文件状态标记为未进行compacting */
+  /* added by ChengZhilong */
+  fix_range_table_picker_->SetCompactionWorking(false);				/* 将该range tab标记为not-working状态 */
   cfd_->compaction_picker()->ReleaseCompactionFiles(this, status);
 }
 

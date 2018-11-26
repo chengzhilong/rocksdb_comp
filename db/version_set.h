@@ -420,6 +420,7 @@ class VersionStorageInfo {
   const int chunk_num_; 
 */
   /* added by ChengZhilong */
+/*
   bool get_key_range_based_compaction() { return key_range_based_compaction_; }
   void set_key_range_based_compaction() { 
   	key_range_based_compaction_ = true;
@@ -428,41 +429,57 @@ class VersionStorageInfo {
   void reset_key_range_based_compaction() {
 	key_range_based_compaction_ = false;
   }
-
+*/
   // added by ChengZhilong
   // 暂时不支持key-range层的多线程compaction
   void get_key_range_boundary(InternalKey* smallest, InternalKey* largest)
   {
+    assert(is_key_range_compaction());
     smallest->Clear(); 		largest->Clear();
 
-//	assert(key_range_based_compaction_ == true);
-
-	*smallest = compaction_item_.start_key_;
-	*largest = compaction_item_.end_key_;
+	*smallest = range_usage_.start;
+	*largest = range_usage_.end;
   }
 
   void get_slice_key_range_boudary(Slice* smallest_key, Slice* largest_key)
   {
-  	*smallest_key = compaction_item_.start_key_.user_key();
-	*largest_key = compaction_item_.end_key_.user_key();
+    assert(is_key_range_compaction());
+  	*smallest_key = range_usage_.start.user_key();
+	*largest_key = range_usage_.end.user_key();
   }
 
-  uint64_t get_range_size() { return compaction_item_.range_size_; }
+  uint64_t get_range_size() { 
+    assert(is_key_range_compaction());
+  	return range_usage_.range_size; 
+  }
 
-  FixedRange* get_fix_range_tab() { return compaction_item_.pending_compated_range_; }
+  FixedRangeTab* get_fix_range_tab() { 
+    assert(is_key_range_compaction());
+  	return compaction_item_.pending_compated_range_; 
+  }
 
   void set_compaction_item(CompactionItem* compaction_item) {
   	compaction_item_.pending_compated_range_ = compaction_item->pending_compated_range_;
-	compaction_item_.start_key_ = compaction_item->start_key_;
+	if (compaction_item_.pending_compated_range_ != nullptr) {
+	  range_usage_ = compaction_item_.pending_compated_range_->RangeUsage();
+	}
+	/*
+	range_usage_.start_key_ = compaction_item->start_key_;
 	compaction_item_.end_key_ = compaction_item->end_key_;
 	compaction_item_.chunk_num_ = compaction_item->chunk_num_;
 	compaction_item_.range_size_ = compaction_item->range_size_;
+	*/
   }
 
+  /* Compaction做析构时会调用 */
   void reset_compaction_item()
   {
-  	memset(&compaction_item_, 0, sizeof(compaction_item_));
 	compaction_item_.pending_compated_range_ = nullptr;
+  }
+
+  bool is_key_range_compaction()
+  {
+	return (compaction_item_.pending_compated_range_ != nullptr);
   }
   
 
@@ -493,11 +510,18 @@ class VersionStorageInfo {
 /*  
   typedef struct CompactionItem{
 	  FixedRange* pending_compated_range_;
-	  InternalKey start_key_, end_key_;
-	  uint64_t range_size_, chunk_num_;
+	  //InternalKey start_key_, end_key_;
+	  //uint64_t range_size_, chunk_num_;
   } CompactionItem;
+
+  struct Usage {
+  	uint64_t chunk_num;
+  	uint64_t range_size;
+  	InternalKey start, end;
+  };
  */
   CompactionItem compaction_item_;
+  Usage range_usage_;
 //  struct CompactionItem compact_item_;		// record chunk-set info
   const int chunk_num_; 
 

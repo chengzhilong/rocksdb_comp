@@ -1234,10 +1234,9 @@ Directory* ColumnFamilyData::GetDataDir(size_t path_id) const {
 // added by ChengZhilong
 // TODO
 // similar to Compaction* LevelCompactionBuilder::PickCompaction(){...}
-Compaction* ColumnFamilyData::KeyRangePickCompaction() {
+/*Compaction* ColumnFamilyData::KeyRangePickCompaction() {
 	return nullptr;
-}
-
+}*/
 
 ColumnFamilySet::ColumnFamilySet(const std::string& dbname,
                                  const ImmutableDBOptions* db_options,

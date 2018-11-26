@@ -1615,6 +1615,10 @@ bool LevelCompactionBuilder::PickKeyRangeFileToCompact() {
     return false;
   }
 
+  if (!vstorage_->is_key_range_compaction()) {
+	return false;
+  }
+
   start_level_inputs_.clear();
 
   start_level_inputs_.level = start_level_;
