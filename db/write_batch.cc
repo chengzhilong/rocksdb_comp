@@ -422,7 +422,7 @@ Status WriteBatch::Iterate(Handler* handler) const {
       column_family = 0;  // default
 
       s = ReadRecordFromWriteBatch(&input, &tag, &column_family, &key, &value,
-                                   &blob, &xid);
+                                   &blob, &xid);		/* 从input读取tag，根据tag类型解析key, value等 */
       if (!s.ok()) {
         return s;
       }
@@ -628,9 +628,9 @@ Status WriteBatchInternal::Put(WriteBatch* b, uint32_t column_family_id,
   }
 
   LocalSavePoint save(b);
-  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);		/* WriteBatch b的count + 1 */
+  WriteBatchInternal::SetCount(b, WriteBatchInternal::Count(b) + 1);	/* WriteBatch b的count + 1 */
   if (column_family_id == 0) {
-    b->rep_.push_back(static_cast<char>(kTypeValue));
+    b->rep_.push_back(static_cast<char>(kTypeValue));					/*将经过Slice封装后的KV插入到batch的rep_中 */
   } else {
     b->rep_.push_back(static_cast<char>(kTypeColumnFamilyValue));
     PutVarint32(&b->rep_, column_family_id);
@@ -1767,7 +1767,7 @@ Status WriteBatchInternal::InsertInto(
     }
     SetSequence(w->batch, inserter.sequence());
     inserter.set_log_number_ref(w->log_ref);
-    w->status = w->batch->Iterate(&inserter);
+    w->status = w->batch->Iterate(&inserter);		/* WriteBatch::Iterate(...) */
     if (!w->status.ok()) {
       return w->status;
     }

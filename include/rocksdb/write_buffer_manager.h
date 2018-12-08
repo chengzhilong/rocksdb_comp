@@ -42,7 +42,7 @@ class WriteBufferManager {
   // Should only be called from write thread
   bool ShouldFlush() const {
     if (enabled()) {
-      if (mutable_memtable_memory_usage() > mutable_limit_) {
+      if (mutable_memtable_memory_usage() > mutable_limit_) {	/* 当前的内存使用量已经超出limit值，需要flush */
         return true;
       }
       if (memory_usage() >= buffer_size_ &&

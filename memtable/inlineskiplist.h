@@ -55,6 +55,11 @@
 
 namespace rocksdb {
 
+/*
+ * 内联跳表是对skiplist的优化，通过更紧凑的内存排列，实现：
+ * 		1. 减少了内存的使用
+ * 		2. 提供了更好的局部性
+ */
 template <class Comparator>
 class InlineSkipList {
  private:
@@ -616,8 +621,9 @@ InlineSkipList<Comparator>::AllocateNode(size_t key_size, int height) {
   // raw + prefix, and holds the bottom-mode (level 0) skip list pointer
   // next_[0].  key_size is the bytes for the key, which comes just after
   // the Node.
+  /* 这里key值占用的空间和创建节点一起分配，可以最多减少一个指针占用的内存(由于内存对齐，可能会少于1个指针占用的内存) */
   char* raw = allocator_->AllocateAligned(prefix + sizeof(Node) + key_size);
-  Node* x = reinterpret_cast<Node*>(raw + prefix);
+  Node* x = reinterpret_cast<Node*>(raw + prefix);		/* Node* x指向的为显示内存，即next_[0]处，而key和其它next_[1~(height-1)]为隐式内存 */
 
   // Once we've linked the node into the skip list we don't actually need
   // to know its height, because we can implicitly use the fact that we
@@ -626,10 +632,12 @@ InlineSkipList<Comparator>::AllocateNode(size_t key_size, int height) {
   // however, so that it can perform the proper links.  Since we're not
   // using the pointers at the moment, StashHeight temporarily borrow
   // storage from next_[0] for that purpose.
-  x->StashHeight(height);
+  /* 为了节省内存，可谓无所不用其极 */
+  x->StashHeight(height);			/* 将height值写到next_[0]的位置，占四个字节；等到该node插入skiplist后该位置就又变成了指针 */
   return x;
 }
 
+/* Splice维护每层的节点的prev/next指针指向关系 */
 template <class Comparator>
 typename InlineSkipList<Comparator>::Splice*
 InlineSkipList<Comparator>::AllocateSplice() {
@@ -714,7 +722,11 @@ template <class Comparator>
 template <bool UseCAS>
 bool InlineSkipList<Comparator>::Insert(const char* key, Splice* splice,
                                         bool allow_partial_splice_fix) {
-  Node* x = reinterpret_cast<Node*>(const_cast<char*>(key)) - 1;
+  /*
+   * InlineSkipList Node：
+   * | next_[-n] | ... | next_[-1] | next_[0] | key_ |
+   */
+  Node* x = reinterpret_cast<Node*>(const_cast<char*>(key)) - 1;	/* x为next_[0]指针 */
   const DecodedKey key_decoded = compare_.decode_key(key);
   int height = x->UnstashHeight();
   assert(height >= 1 && height <= kMaxHeight_);

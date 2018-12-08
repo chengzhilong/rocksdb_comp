@@ -32,7 +32,7 @@ typedef BinaryHeap<IteratorWrapper*, MaxIteratorComparator> MergerMaxIterHeap;
 typedef BinaryHeap<IteratorWrapper*, MinIteratorComparator> MergerMinIterHeap;
 }  // namespace
 
-const size_t kNumIterReserve = 4;
+const size_t kNumIterReserve = 4;	/* 默认大小为4，如果实际需要比4还大的空间，可自动调整为实际所需空间 */
 
 class MergingIterator : public InternalIterator {
  public:

@@ -214,6 +214,10 @@ void WriteThread::SetState(Writer* w, uint8_t new_state) {
   }
 }
 
+/*
+ * 把w插入到newest_writer的list，newest_writer指向w，如果w前面没有元素了，
+ * w就是leader，返回true，线程安全
+ */
 bool WriteThread::LinkOne(Writer* w, std::atomic<Writer*>* newest_writer) {
   assert(newest_writer != nullptr);
   assert(w->state == STATE_INIT);
@@ -226,6 +230,11 @@ bool WriteThread::LinkOne(Writer* w, std::atomic<Writer*>* newest_writer) {
   }
 }
 
+/*
+ * 把write_group里面所有writer的的next指针解除，把write_group里面的
+ * leader链接到newest_writer，如果leader前面没有元素了，返回true，
+ * 线程安全
+ */
 bool WriteThread::LinkGroup(WriteGroup& write_group,
                             std::atomic<Writer*>* newest_writer) {
   assert(newest_writer != nullptr);
@@ -263,6 +272,7 @@ void WriteThread::CreateMissingNewerLinks(Writer* head) {
   }
 }
 
+/* 寻找下一个leader，只能从该from处往link_older方向寻找，遇到边界之前停止 */
 WriteThread::Writer* WriteThread::FindNextLeader(Writer* from,
                                                  Writer* boundary) {
   assert(from != nullptr && from != boundary);
@@ -277,10 +287,10 @@ WriteThread::Writer* WriteThread::FindNextLeader(Writer* from,
 void WriteThread::CompleteLeader(WriteGroup& write_group) {
   assert(write_group.size > 0);
   Writer* leader = write_group.leader;
-  if (write_group.size == 1) {
+  if (write_group.size == 1) {			/* 只有leader一个节点，没必要删除，修改leader和last_writer指针即可 */
     write_group.leader = nullptr;
     write_group.last_writer = nullptr;
-  } else {
+  } else {								/* 删除双向链表head节点 */
     assert(leader->link_newer != nullptr);
     leader->link_newer->link_older = nullptr;
     write_group.leader = leader->link_newer;
@@ -292,10 +302,10 @@ void WriteThread::CompleteLeader(WriteGroup& write_group) {
 void WriteThread::CompleteFollower(Writer* w, WriteGroup& write_group) {
   assert(write_group.size > 1);
   assert(w != write_group.leader);
-  if (w == write_group.last_writer) {
+  if (w == write_group.last_writer) {		/* 从双向链表中删除末尾节点w */
     w->link_older->link_newer = nullptr;
     write_group.last_writer = w->link_older;
-  } else {
+  } else {									/* 从双向链表中删除w节点 */
     w->link_older->link_newer = w->link_newer;
     w->link_newer->link_older = w->link_older;
   }
@@ -304,9 +314,8 @@ void WriteThread::CompleteFollower(Writer* w, WriteGroup& write_group) {
 }
 
 static WriteThread::AdaptationContext jbg_ctx("JoinBatchGroup");
-/* 如果WriteThread链表没有其它Writer，则该Writer状态转换成STATE_GROUP_LEADER;
- * 否则，调用AwaitState()在一个快速的轮询尝试后状态仍然没有变化，则把自己状态
- * 设置为lock_waited，进行阻塞等待
+/* 先调用LinkOne函数，把w插入list，如果w是leader的话直接返回，否则调用
+ * AwaitState函数，等待w是leader或者w是finish状态
  */
 void WriteThread::JoinBatchGroup(Writer* w) {						/* 将一个Writer插入到WriteThread的Writer链表中 */
   TEST_SYNC_POINT_CALLBACK("WriteThread::JoinBatchGroup:Start", w);
@@ -419,6 +428,10 @@ size_t WriteThread::EnterAsBatchGroupLeader(Writer* leader,
   return size;
 }
 
+/*
+ * 构造写memtable的write group，如果有batch且里面有merge操作，则不能合并，
+ * 空batch也不能合并
+ */
 void WriteThread::EnterAsMemTableWriter(Writer* leader,
                                         WriteGroup* write_group) {
   assert(leader != nullptr);
@@ -426,7 +439,7 @@ void WriteThread::EnterAsMemTableWriter(Writer* leader,
   assert(leader->batch != nullptr);
   assert(write_group != nullptr);
 
-  size_t size = WriteBatchInternal::ByteSize(leader->batch);
+  size_t size = WriteBatchInternal::ByteSize(leader->batch);/* 获取leader对应batch的size */
 
   // Allow the group to grow up to a maximum size, but if the
   // original write is small, limit the growth so we do not slow
@@ -477,6 +490,12 @@ void WriteThread::EnterAsMemTableWriter(Writer* leader,
       last_writer->sequence + WriteBatchInternal::Count(last_writer->batch) - 1;
 }
 
+/*
+ * 唤醒新的STATE_MEMTABLE_WRITER_LEADER，所有batch变成STATE_COMPLETED
+ * (这里leader之所以最后变成STATE_COMPLETED,是leader线程持有write group
+ * 对象，如果leader线程先退出，write group就会被析构释放，其它的batch
+ * 持有的write group的指针就变成野指针)
+ */
 void WriteThread::ExitAsMemTableWriter(Writer* /*self*/,
                                        WriteGroup& write_group) {
   Writer* leader = write_group.leader;
@@ -519,6 +538,9 @@ void WriteThread::LaunchParallelMemTableWriters(WriteGroup* write_group) {
 
 static WriteThread::AdaptationContext cpmtw_ctx("CompleteParallelMemTableWriter");
 // This method is called by both the leader and parallel followers
+/* 最后一个batch return true然后调用 ExitAsMemTableWriter ，其它batch等待
+ * STATE_COMPLETED，最后一个batch（不一定是leader）会唤醒其它batch 
+ */
 bool WriteThread::CompleteParallelMemTableWriter(Writer* w) {
 
   auto* write_group = w->write_group;
@@ -549,6 +571,13 @@ void WriteThread::ExitAsBatchGroupFollower(Writer* w) {
 }
 
 static WriteThread::AdaptationContext eabgl_ctx("ExitAsBatchGroupLeader");
+/*
+ * 1. 如果开启enable_pipelined_write_选项，如果batch不写memtable，那么write操作完成，
+ *    否则就调用LinkGroup函数，next指针解除，唤醒next_leader，等待leader成为STATE_M
+ *    EMTABLE_WRITER_LEADER
+ * 2. 没有开启enable_pipelined_write_，唤醒next_leader，group里面所有的batch变成STAT
+ *    E_COMPLETED
+ */
 void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
                                          Status status) {
   Writer* leader = write_group.leader;
@@ -661,7 +690,7 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
       // as it is marked committed the other thread's Await may return and
       // deallocate the Writer.
       auto next = last_writer->link_older;
-      SetState(last_writer, STATE_COMPLETED);		/* 给write_group的所有writer标记为STATE_COMPLETED */
+      SetState(last_writer, STATE_COMPLETED);	/* 给write_group的所有writer标记为STATE_COMPLETED */
 
       last_writer = next;
     }
@@ -669,6 +698,10 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
 }
 
 static WriteThread::AdaptationContext eu_ctx("EnterUnbatched");
+/*
+ * 插入空batch，直到等待成为leader，FlushMemtable、SwitchMemtable到时候会调用
+ * 调用这个函数时线程持有db大锁
+ */
 void WriteThread::EnterUnbatched(Writer* w, InstrumentedMutex* mu) {
   assert(w != nullptr && w->batch == nullptr);
   mu->Unlock();
@@ -684,6 +717,7 @@ void WriteThread::EnterUnbatched(Writer* w, InstrumentedMutex* mu) {
   mu->Lock();
 }
 
+/* 唤醒新的leader */
 void WriteThread::ExitUnbatched(Writer* w) {
   assert(w != nullptr);
   Writer* newest_writer = w;
@@ -697,6 +731,7 @@ void WriteThread::ExitUnbatched(Writer* w) {
 }
 
 static WriteThread::AdaptationContext wfmw_ctx("WaitForMemTableWriters");
+/* 构造一个空batch插入到写memtable链表，等待成为leader，调用这个函数时线程持有db大锁 */
 void WriteThread::WaitForMemTableWriters() {
   assert(enable_pipelined_write_);
   if (newest_memtable_writer_.load() == nullptr) {

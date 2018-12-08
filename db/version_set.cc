@@ -4180,7 +4180,7 @@ InternalIterator* VersionSet::MakeKeyRangeBasedInputIterator(
 	InternalIterator** list = new InternalIterator* [space];
 	size_t num = 0;
 	
-	list[num++] = cfd->fixed_range_table()->NewIterator(cfd, nullptr);
+	list[num++] = c->get_fix_range_tab()->NewInternalIterator(cfd, nullptr);
 	for (size_t which = 1; which < space; which++) {
 		list[num++] = new LevelIterator(
 			cfd->table_cache(), read_options, env_options_compactions,

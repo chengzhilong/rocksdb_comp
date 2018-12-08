@@ -252,6 +252,27 @@ class Compaction {
   uint32_t max_subcompactions() const { return max_subcompactions_; }
 
   uint64_t MaxInputFileCreationTime() const;
+  
+  void CleanUpKeyRangeTab() {
+  	if (fix_range_table_picker_ != nullptr) {
+		fix_range_table_picker_->CleanUp();
+		vstorage_->reset_compaction_item();
+  	}
+  }
+
+  // added by ChengZhilong
+  /*uint64_t getChunkNum()
+  {
+  	if (start_level_ == 0) {
+		return compact_item_->chunk_num_;
+  	}
+	return 0;
+  }*/
+
+  FixedRangeTab* get_fix_range_tab() {
+    assert(fix_range_table_picker_ != nullptr);
+	return fix_range_table_picker_;
+  }
 
  private:
   // mark (or clear) all files that are being compacted
@@ -275,23 +296,7 @@ class Compaction {
 
   static bool IsFullCompaction(VersionStorageInfo* vstorage,
                                const std::vector<CompactionInputFiles>& inputs);
-
-  void CleanUpKeyRangeTab() {
-  	if (fix_range_table_picker_ != nullptr) {
-		fix_range_table_picker_->CleanUp();
-		vstorage_->reset_compaction_item();
-  	}
-  }
-
-  // added by ChengZhilong
-  uint64_t getChunkNum()
-  {
-  	if (start_level_ == 0) {
-		return compact_item_->chunk_num_;
-  	}
-	return 0;
-  }
-
+  
   VersionStorageInfo* input_vstorage_;
 
   const int start_level_;    // the lowest level to be compacted
@@ -363,8 +368,8 @@ class Compaction {
   // };
   // Called by CompactionItem* FixedRangeChunkBasedNVMWriteCache::GetCompactionData();
   // Initialized in VersionSet when compact_level_ == 0, 
-  struct CompactionItem compact_item_;		// record chunk-set info
-  const int chunk_num_;
+//  struct CompactionItem compact_item_;		// record chunk-set info
+//  const int chunk_num_;
 
   // similar to TableCache
   // 在key_range准备compaction时初始化该值，否则一直为nullptr???

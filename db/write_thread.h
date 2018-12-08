@@ -74,6 +74,7 @@ class WriteThread {
 
   struct Writer;
 
+  /* WriteGroup结构体管理的是状态还没有达到STATE_COMPLETED状态的Write*节点 */
   struct WriteGroup {
     Writer* leader = nullptr;
     Writer* last_writer = nullptr;
@@ -132,6 +133,7 @@ class WriteThread {
 
     std::aligned_storage<sizeof(std::mutex)>::type state_mutex_bytes;
     std::aligned_storage<sizeof(std::condition_variable)>::type state_cv_bytes;
+	// 这里类似于双向链表：link_older: 可理解为prev指针, link_newer: 可理解为next指针
     Writer* link_older;  // read/write only before linking, or as leader
     Writer* link_newer;  // lazy, read/write only before linking, or as leader
 

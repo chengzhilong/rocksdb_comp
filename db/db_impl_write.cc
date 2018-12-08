@@ -112,16 +112,17 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
 
   PERF_TIMER_GUARD(write_pre_and_post_process_time);
   WriteThread::Writer w(write_options, my_batch, callback, log_ref,
-                        disable_memtable, batch_cnt, pre_release_callback);
+                        disable_memtable, batch_cnt, pre_release_callback);		/* 根据WriteBatch构建Writer对象 */
 
   if (!write_options.disableWAL) {
     RecordTick(stats_, WRITE_WITH_WAL);
   }
 
   StopWatch write_sw(env_, immutable_db_options_.statistics.get(), DB_WRITE);
-
-  write_thread_.JoinBatchGroup(&w);			/* 将w加入到write_thread_的write链表中 */
-  if (w.state == WriteThread::STATE_PARALLEL_MEMTABLE_WRITER) {
+  /* 将w加入到write_thread_的write链表中，阻塞直到w是leader状态或finish状态 */
+  write_thread_.JoinBatchGroup(&w);
+  /* 程序执行到这儿，只有两种可能：w是LEADER状态或w已经执行完了 */
+  if (w.state == WriteThread::STATE_PARALLEL_MEMTABLE_WRITER) {		/* PARALLEL模式 */
     // we are a non-leader in a parallel group
 
     if (w.ShouldWriteToMemtable()) {
@@ -162,7 +163,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
 
     status = w.FinalStatus();
   }
-  if (w.state == WriteThread::STATE_COMPLETED) {
+  if (w.state == WriteThread::STATE_COMPLETED) {		/* 如果w已经执行完了，则返回状态 */
     if (log_used != nullptr) {
       *log_used = w.log_used;
     }
@@ -173,7 +174,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     return w.FinalStatus();
   }
   // else we are the leader of the write batch group
-  assert(w.state == WriteThread::STATE_GROUP_LEADER);
+  assert(w.state == WriteThread::STATE_GROUP_LEADER);	/* 否则w一定是LEADER状态 */
 
   // Once reaches this point, the current writer "w" will try to do its write
   // job.  It may also pick up some of the remaining writers in the "writers_"
@@ -709,7 +710,7 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
   assert(!single_column_family_mode_ ||
          versions_->GetColumnFamilySet()->NumberOfColumnFamilies() == 1);
   if (UNLIKELY(status.ok() && !single_column_family_mode_ &&
-               total_log_size_ > GetMaxTotalWalSize())) {			/* 总的log_size超过预设的阈值，则需要切换新的WAL */
+               total_log_size_ > GetMaxTotalWalSize())) {			/* 总的log_size超过预设的阈值，则需要创建并切换新的WAL */
     status = SwitchWAL(write_context);
   }
 
@@ -1453,12 +1454,12 @@ Status DB::Put(const WriteOptions& opt, ColumnFamilyHandle* column_family,
   // Pre-allocate size of write batch conservatively.
   // 8 bytes are taken by header, 4 bytes for count, 1 byte for type,
   // and we allocate 11 extra bytes for key length, as well as value length.
-  WriteBatch batch(key.size() + value.size() + 24);		/* | header(8) | count(4) | type(1) | key+value_length(11) | */
+  WriteBatch batch(key.size() + value.size() + 24);		/* | head(8) | count(4) | type(1) | key+value_length(11) | */
   Status s = batch.Put(column_family, key, value);		/* 经过多次函数调用，将key+value+cf写到writebatch中 */
   if (!s.ok()) {
     return s;
   }
-  return Write(opt, &batch);							/* 调用DBImpl::Write(...) */
+  return Write(opt, &batch);							/* 调用DBImpl::Write(...), KV存放在batch中 */
 }
 
 Status DB::Delete(const WriteOptions& opt, ColumnFamilyHandle* column_family,
